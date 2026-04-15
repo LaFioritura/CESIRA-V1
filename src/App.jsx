@@ -298,9 +298,15 @@ export default function CesiraV1(){
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
   const [midiEnabled,setMidiEnabled]=useState(false);
-  const [selectedStep,setSelectedStep]=useState(null); // {lane,idx}
-  const [fmIndex,setFmIndex]=useState(0.62); // FM modulation index
+  const [selectedStep,setSelectedStep]=useState(null);
+  const [fmIndex,setFmIndex]=useState(0.62);
   const [scopeAnalyser,setScopeAnalyser]=useState(null);
+  // Sound Design — per-lane custom synth params (overrides preset when active)
+  const [soundDesign,setSoundDesign]=useState({
+    bass:  {active:false,osc:'sawtooth',osc2:'sine',detune:5,filterType:'lowpass',cutoff:0.55,res:0.3,atk:0.008,dec:0.25,sus:0.6,rel:0.4,sub:0.5,drive:0.1},
+    synth: {active:false,osc:'sawtooth',osc2:'triangle',detune:8,filterType:'lowpass',cutoff:0.65,res:0.2,atk:0.02,dec:0.3,sus:0.7,rel:0.5,drive:0.08,lfo:0.3,lfoRate:3},
+  });
+  const soundDesignRef=useRef(soundDesign);
 
   // Undo/Redo
   const undoStack=useRef([]);const redoStack=useRef([]);
@@ -333,6 +339,7 @@ export default function CesiraV1(){
   useEffect(()=>{harmonicProfileRef.current=harmonicProfile;},[harmonicProfile]);useEffect(()=>{humanizeRef.current=humanize;},[humanize]);useEffect(()=>{stutterOnRef.current=stutterOn;},[stutterOn]);
   useEffect(()=>{stutterBurstRef.current=stutterBurst;},[stutterBurst]);useEffect(()=>{laneVolumesRef.current=laneVolumes;},[laneVolumes]);
   useEffect(()=>{drumPresetRef.current=drumPreset;},[drumPreset]);useEffect(()=>{bassPresetRef.current=bassPreset;},[bassPreset]);useEffect(()=>{synthPresetRef.current=synthPreset;},[synthPreset]);
+  useEffect(()=>{soundDesignRef.current=soundDesign;},[soundDesign]);
   useEffect(()=>{bassWaveRef.current=bassWave;},[bassWave]);useEffect(()=>{synthWaveRef.current=synthWave;},[synthWave]);useEffect(()=>{fmIndexRef.current=fmIndex;},[fmIndex]);
   useEffect(()=>{recordingsRef.current=recordings;},[recordings]);
   useEffect(()=>{LANE_KEYS.forEach(lane=>{const node=laneGainNodes.current[lane];if(node&&audioRef.current)node.gain.setTargetAtTime(laneVolumes[lane],audioRef.current.ctx.currentTime,0.02);});},[laneVolumes]);
@@ -519,11 +526,57 @@ export default function CesiraV1(){
     src.playbackRate.value=0.97+Math.random()*0.06;src.connect(fil);fil.connect(g);const fxn=routeLaneFx(g,resolveDrumFx(p.type));cleanup(src,[fil,g,...fxn],750);safeStart(src,t);safeStop(src,t+0.2);
   };
 
-  const playBassAt=(pi,note,accent,t)=>{
-    const audio=audioRef.current;if(!audio)return;const p=bassPresets[pi],f=noteToFreq[note]||110,bs=pickWave(p.mode,'bass');
+  // Active node counter — hard cap to prevent audio thread overload
+  const activeNodesRef=useRef(0);
+  const MAX_NODES=120;
+  const nodeGuard=()=>{if(activeNodesRef.current>=MAX_NODES)return false;return true;};
+  const trackNode=(n,ms)=>{activeNodesRef.current++;setTimeout(()=>{activeNodesRef.current=Math.max(0,activeNodesRef.current-1);},ms+100);};
+
+  // stepSec: real duration of a step at current BPM
+  const stepSec=()=>(60/bpmRef.current)/4;
+
+  const playBassAt=(pi,note,accent,t,noteLenSteps=1)=>{
+    if(!nodeGuard())return;
+    const audio=audioRef.current;if(!audio)return;
+    // Custom sound design override
+    const sd=soundDesignRef.current?.bass;
+    if(sd?.active){
+      const f=noteToFreq[note]||110;
+      const noteDur=clamp(stepSec()*noteLenSteps*0.95,0.04,8.0);
+      const atkT=Math.min(sd.atk,noteDur*0.4);const relT=Math.min(sd.rel+noteDur*0.5,noteDur*0.95);
+      const cleanMs=(relT+0.4)*1000;
+      const o1=audio.ctx.createOscillator(),o2=audio.ctx.createOscillator(),sub=audio.ctx.createGain();
+      const fil=audio.ctx.createBiquadFilter(),g=audio.ctx.createGain(),driveN=audio.ctx.createWaveShaper();
+      o1.type=sd.osc;o2.type=sd.osc2;
+      o1.frequency.value=f;o2.frequency.value=f*(1+sd.detune/1200);
+      sub.gain.value=sd.sub;fil.type=sd.filterType;
+      fil.frequency.setValueAtTime(80+sd.cutoff*4000,t);fil.Q.value=0.5+sd.res*8;
+      setDriveCurve(driveN,sd.drive);
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.linearRampToValueAtTime(0.72*accent,t+atkT);
+      g.gain.setValueAtTime(0.72*accent*sd.sus,t+Math.min(atkT+sd.dec,relT*0.6));
+      g.gain.exponentialRampToValueAtTime(0.0001,t+relT);
+      o1.connect(fil);o2.connect(sub);sub.connect(fil);fil.connect(driveN);driveN.connect(g);
+      const fxn=routeLaneFx(g,'bass');
+      trackNode(o1,cleanMs);cleanup(o1,[o2,sub,fil,driveN,g,...fxn],cleanMs);
+      safeStart(o1,t);safeStart(o2,t);safeStop(o1,t+relT+0.05);safeStop(o2,t+relT+0.05);
+      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,relT*1000);return;
+    }
+    const p=bassPresets[pi],f=noteToFreq[note]||110,bs=pickWave(p.mode,'bass');
+    // Real note duration from step length — capped to avoid runaway long notes
+    const noteDur=clamp(stepSec()*noteLenSteps*0.95,0.04,8.0);
+    const relTime=Math.max(0.04,noteDur*0.85); // release starts just before note end
     const g=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter();
-    fil.type=p.mode==='bit'?'highpass':'lowpass';fil.frequency.setValueAtTime(80+bassCutoff*2000+tone*800+pi*12,t);fil.Q.value=0.5+resonance*5+(p.mode==='grit'?0.5:0);
-    rampEnv(g.gain,t,0.003,p.mode==='drone'?0.58:0.24,0.72*accent);
+    fil.type=p.mode==='bit'?'highpass':'lowpass';
+    fil.frequency.setValueAtTime(80+bassCutoff*2000+tone*800+pi*12,t);
+    fil.Q.value=0.5+resonance*5+(p.mode==='grit'?0.5:0);
+    // ADSR envelope scaled to note duration
+    const atkT=Math.min(0.008,noteDur*0.05);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.linearRampToValueAtTime(0.72*accent,t+atkT);
+    g.gain.setValueAtTime(0.72*accent,t+relTime*0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+relTime);
+    const cleanMs=(relTime+0.3)*1000;
 
     if(p.mode==='fm'||p.mode==='bit'){
       const idx=fmIndexRef.current*(p.mode==='bit'?3:1.5);
@@ -531,68 +584,123 @@ export default function CesiraV1(){
       const sub=audio.ctx.createGain();sub.gain.value=bassSubAmount*0.4;
       const subOsc=audio.ctx.createOscillator();subOsc.type='sine';subOsc.frequency.value=f*0.5;
       carrier.connect(fil);subOsc.connect(sub);sub.connect(fil);fil.connect(g);
-      const fxn=routeLaneFx(g,'bass');cleanup(carrier,[modulator,modGain,sub,subOsc,fil,g,...fxn],1100);
-      safeStart(carrier,t);safeStart(modulator,t);safeStart(subOsc,t);safeStop(carrier,t+0.52);safeStop(modulator,t+0.52);safeStop(subOsc,t+0.52);
-      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,520);return;
+      const fxn=routeLaneFx(g,'bass');
+      trackNode(carrier,cleanMs);
+      cleanup(carrier,[modulator,modGain,sub,subOsc,fil,g,...fxn],cleanMs);
+      safeStart(carrier,t);safeStart(modulator,t);safeStart(subOsc,t);
+      safeStop(carrier,t+relTime+0.05);safeStop(modulator,t+relTime+0.05);safeStop(subOsc,t+relTime+0.05);
+      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,relTime*1000);return;
     }
 
     if(p.mode==='fold'||p.mode==='wet'){
-      // Ring modulation: carrier × ring oscillator
-      const carrier=audio.ctx.createOscillator(),ringOsc=audio.ctx.createOscillator(),ringGain=audio.ctx.createGain();
+      const carrier=audio.ctx.createOscillator(),ringOsc=audio.ctx.createOscillator();
       carrier.type='sawtooth';carrier.frequency.value=f;
       ringOsc.type='sine';ringOsc.frequency.value=f*(p.mode==='fold'?1.5:0.75);
-      ringGain.gain.value=0; // ring mod via gain modulation
       const ringMod=audio.ctx.createGain();ringMod.gain.value=0.5;
+      const ringGain=audio.ctx.createGain();ringGain.gain.value=0;
       ringOsc.connect(ringGain);ringGain.connect(ringMod.gain);carrier.connect(ringMod);ringMod.connect(fil);
       const sub=audio.ctx.createGain();sub.gain.value=bassSubAmount*0.5;
       const subOsc=audio.ctx.createOscillator();subOsc.type='sine';subOsc.frequency.value=f*0.5;
       subOsc.connect(sub);sub.connect(fil);fil.connect(g);
-      const fxn=routeLaneFx(g,'bass');cleanup(carrier,[ringOsc,ringGain,ringMod,sub,subOsc,fil,g,...fxn],1100);
-      safeStart(carrier,t);safeStart(ringOsc,t);safeStart(subOsc,t);safeStop(carrier,t+0.5);safeStop(ringOsc,t+0.5);safeStop(subOsc,t+0.5);
-      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,500);return;
+      const fxn=routeLaneFx(g,'bass');
+      trackNode(carrier,cleanMs);
+      cleanup(carrier,[ringOsc,ringGain,ringMod,sub,subOsc,fil,g,...fxn],cleanMs);
+      safeStart(carrier,t);safeStart(ringOsc,t);safeStart(subOsc,t);
+      safeStop(carrier,t+relTime+0.05);safeStop(ringOsc,t+relTime+0.05);safeStop(subOsc,t+relTime+0.05);
+      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,relTime*1000);return;
     }
 
     const o1=audio.ctx.createOscillator(),o2=audio.ctx.createOscillator(),sub=audio.ctx.createGain(),tg=audio.ctx.createGain(),lfo=audio.ctx.createOscillator(),lg=audio.ctx.createGain();
-    o1.type=bs==='sine'?'sine':bs==='triangle'?'triangle':bs==='square'?'square':['sub','tube','wet'].includes(p.mode)?'sine':['pulse'].includes(p.mode)?'square':'sawtooth';
+    o1.type=bs==='sine'?'sine':bs==='triangle'?'triangle':bs==='square'?'square':['sub','tube'].includes(p.mode)?'sine':p.mode==='pulse'?'square':'sawtooth';
     o2.type=bs==='triangle'?'triangle':bs==='square'?'square':'sawtooth';
     o1.frequency.setValueAtTime(f,t);o2.frequency.setValueAtTime(f*1.005,t);
     sub.gain.value=bassSubAmount*(p.mode==='sub'?0.85:0.35);tg.gain.value=0.13+noise*0.1;
     lfo.frequency.value=0.4+bassLfo*8;lg.gain.value=clamp(bassLfo*10+(p.mode==='drone'?2.5:0),0,28);
     lfo.connect(lg);lg.connect(fil.frequency);o1.connect(sub);o2.connect(tg);sub.connect(fil);tg.connect(fil);fil.connect(g);
-    const fxn=routeLaneFx(g,'bass');cleanup(o1,[o2,lfo,sub,tg,fil,g,lg,...fxn],1100);
-    safeStart(o1,t);safeStart(o2,t);safeStart(lfo,t);safeStop(o1,t+0.5);safeStop(o2,t+0.5);safeStop(lfo,t+0.5);
-    sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,500);
+    const fxn=routeLaneFx(g,'bass');
+    trackNode(o1,cleanMs);
+    cleanup(o1,[o2,lfo,sub,tg,fil,g,lg,...fxn],cleanMs);
+    safeStart(o1,t);safeStart(o2,t);safeStart(lfo,t);
+    safeStop(o1,t+relTime+0.05);safeStop(o2,t+relTime+0.05);safeStop(lfo,t+relTime+0.05);
+    sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,relTime*1000);
   };
 
-  const playSynthAt=(pi,note,accent,t)=>{
-    const audio=audioRef.current;if(!audio)return;const p=synthPresets[pi],f=noteToFreq[note]||440,ss=pickWave(p.mode,'synth');
+  const playSynthAt=(pi,note,accent,t,noteLenSteps=1)=>{
+    if(!nodeGuard())return;
+    const audio=audioRef.current;if(!audio)return;
+    // Custom sound design override
+    const sd=soundDesignRef.current?.synth;
+    if(sd?.active){
+      const f=noteToFreq[note]||440;
+      const noteDur=clamp(stepSec()*noteLenSteps*0.95,0.04,8.0);
+      const atkT=Math.min(sd.atk,noteDur*0.4);const relT=Math.min(sd.rel+noteDur*0.5,noteDur*0.95);
+      const cleanMs=(relT+0.5)*1000;
+      const oA=audio.ctx.createOscillator(),oB=audio.ctx.createOscillator();
+      const mix=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter(),amp=audio.ctx.createGain();
+      const lfoOsc=audio.ctx.createOscillator(),lfoG=audio.ctx.createGain();
+      const driveN=audio.ctx.createWaveShaper();
+      oA.type=sd.osc;oB.type=sd.osc2;oA.frequency.value=f;oB.frequency.value=f*(1+sd.detune/1200);
+      fil.type=sd.filterType;fil.frequency.value=200+sd.cutoff*7000;fil.Q.value=0.5+sd.res*7;
+      lfoOsc.frequency.value=sd.lfoRate||3;lfoG.gain.value=(sd.lfo||0)*800;
+      lfoOsc.connect(lfoG);lfoG.connect(fil.frequency);
+      setDriveCurve(driveN,sd.drive||0.05);
+      amp.gain.setValueAtTime(0.0001,t);
+      amp.gain.linearRampToValueAtTime(0.44*accent,t+atkT);
+      amp.gain.setValueAtTime(0.44*accent*sd.sus,t+Math.min(atkT+sd.dec,relT*0.6));
+      amp.gain.exponentialRampToValueAtTime(0.0001,t+relT);
+      oA.connect(mix);oB.connect(mix);mix.connect(fil);fil.connect(driveN);driveN.connect(amp);
+      const fxn=routeLaneFx(amp,'synth');
+      trackNode(oA,cleanMs);cleanup(oA,[oB,mix,fil,driveN,amp,lfoOsc,lfoG,...fxn],cleanMs);
+      safeStart(oA,t);safeStart(oB,t);safeStart(lfoOsc,t);
+      safeStop(oA,t+relT+0.1);safeStop(oB,t+relT+0.1);safeStop(lfoOsc,t+relT+0.1);
+      sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,relT*1000);return;
+    }
+    const p=synthPresets[pi],f=noteToFreq[note]||440,ss=pickWave(p.mode,'synth');
+    const noteDur=clamp(stepSec()*noteLenSteps*0.95,0.04,8.0);
+    const atkT=Math.min(0.005+synthAttack*0.18,noteDur*0.4);
+    const relT=Math.max(atkT+0.02,noteDur*(0.5+synthRelease*0.5)+space*0.3);
+    const holdEnd=Math.max(atkT+0.01,noteDur*0.7);
+    const cleanMs=(relT+0.5)*1000;
+
     const mix=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter(),amp=audio.ctx.createGain();
     const vib=audio.ctx.createOscillator(),vg=audio.ctx.createGain(),nn=audio.ctx.createBufferSource(),ng=audio.ctx.createGain();
-    nn.buffer=createNoise(0.5,noise*0.7);
-    fil.type=['air','mist'].includes(p.mode)?'bandpass':'lowpass';fil.frequency.value=200+synthCutoff*6500+tone*1600+pi*18;fil.Q.value=0.6+resonance*4.5+(p.mode==='bell'?1.1:p.mode==='glass'?0.5:0);
+    nn.buffer=createNoise(Math.min(noteDur+0.1,2.0),noise*0.7);
+    fil.type=['air','mist'].includes(p.mode)?'bandpass':'lowpass';
+    fil.frequency.value=200+synthCutoff*6500+tone*1600+pi*18;
+    fil.Q.value=0.6+resonance*4.5+(p.mode==='bell'?1.1:p.mode==='glass'?0.5:0);
     vib.frequency.value=0.5+synthLfo*9;vg.gain.value=clamp(synthLfo*9+(['lead','star'].includes(p.mode)?1.2:0),0,22);
     ng.gain.value=['mist','air','choir'].includes(p.mode)?0.12+noise*0.1:0.018;
+    // Proper ADSR
+    amp.gain.setValueAtTime(0.0001,t);
+    amp.gain.linearRampToValueAtTime(0.44*accent,t+atkT);
+    amp.gain.setValueAtTime(0.44*accent,t+holdEnd);
+    amp.gain.exponentialRampToValueAtTime(0.0001,t+relT);
 
     if(['glass','bell','star','candy'].includes(p.mode)){
-      // FM synth for bell/glass timbres
       const idx=fmIndexRef.current*(p.mode==='bell'?2:p.mode==='glass'?1.2:1.5);
       const{carrier,modulator,modGain}=makeFmPair(audio.ctx,f,p.mode==='bell'?3.0:p.mode==='candy'?2.0:2.5,idx,'sine');
-      vib.connect(vg);vg.connect(carrier.frequency);vg.connect(modulator.frequency);nn.connect(ng);ng.connect(mix);carrier.connect(mix);mix.connect(fil);fil.connect(amp);
-      amp.gain.setValueAtTime(0.0001,t);amp.gain.linearRampToValueAtTime(0.44*accent,t+(0.004+synthAttack*0.14));amp.gain.exponentialRampToValueAtTime(0.0001,t+0.14+synthRelease*1.0+space*0.3);
-      const fxn=routeLaneFx(amp,'synth');cleanup(carrier,[modulator,modGain,vib,nn,mix,fil,amp,vg,ng,...fxn],1500);
-      safeStart(carrier,t);safeStart(modulator,t);safeStart(nn,t);safeStart(vib,t);safeStop(carrier,t+1.1);safeStop(modulator,t+1.1);safeStop(nn,t+1.1);safeStop(vib,t+1.1);
-      sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,1100);return;
+      vib.connect(vg);vg.connect(carrier.frequency);vg.connect(modulator.frequency);
+      nn.connect(ng);ng.connect(mix);carrier.connect(mix);mix.connect(fil);fil.connect(amp);
+      const fxn=routeLaneFx(amp,'synth');
+      trackNode(carrier,cleanMs);
+      cleanup(carrier,[modulator,modGain,vib,nn,mix,fil,amp,vg,ng,...fxn],cleanMs);
+      safeStart(carrier,t);safeStart(modulator,t);safeStart(nn,t);safeStart(vib,t);
+      safeStop(carrier,t+relT+0.1);safeStop(modulator,t+relT+0.1);safeStop(nn,t+relT+0.1);safeStop(vib,t+relT+0.1);
+      sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,relT*1000);return;
     }
 
     const oA=audio.ctx.createOscillator(),oB=audio.ctx.createOscillator();
-    oA.type=ss==='sine'?'sine':ss==='triangle'?'triangle':ss==='square'?'square':['lead'].includes(p.mode)?'square':'sawtooth';
+    oA.type=ss==='sine'?'sine':ss==='triangle'?'triangle':ss==='square'?'square':p.mode==='lead'?'square':'sawtooth';
     oB.type=ss==='square'?'square':ss==='sine'?'sine':['pad','choir','mist'].includes(p.mode)?'sine':'triangle';
     oA.frequency.value=f;oB.frequency.value=f*1.008;
-    vib.connect(vg);vg.connect(oA.frequency);vg.connect(oB.frequency);oA.connect(mix);oB.connect(mix);nn.connect(ng);ng.connect(mix);mix.connect(fil);fil.connect(amp);
-    amp.gain.setValueAtTime(0.0001,t);amp.gain.linearRampToValueAtTime(0.44*accent,t+(0.004+synthAttack*0.15));amp.gain.exponentialRampToValueAtTime(0.0001,t+0.15+synthRelease*1.05+space*0.32);
-    const fxn=routeLaneFx(amp,'synth');cleanup(oA,[oB,vib,nn,mix,fil,amp,vg,ng,...fxn],1500);
-    safeStart(oA,t);safeStart(oB,t);safeStart(nn,t);safeStart(vib,t);safeStop(oA,t+1.1);safeStop(oB,t+1.1);safeStop(nn,t+1.1);safeStop(vib,t+1.1);
-    sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,1100);
+    vib.connect(vg);vg.connect(oA.frequency);vg.connect(oB.frequency);
+    oA.connect(mix);oB.connect(mix);nn.connect(ng);ng.connect(mix);mix.connect(fil);fil.connect(amp);
+    const fxn=routeLaneFx(amp,'synth');
+    trackNode(oA,cleanMs);
+    cleanup(oA,[oB,vib,nn,mix,fil,amp,vg,ng,...fxn],cleanMs);
+    safeStart(oA,t);safeStart(oB,t);safeStart(nn,t);safeStart(vib,t);
+    safeStop(oA,t+relT+0.1);safeStop(oB,t+relT+0.1);safeStop(nn,t+relT+0.1);safeStop(vib,t+relT+0.1);
+    sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,relT*1000);
   };
 
   const playMetronomeAt=(isDownbeat,t)=>{
@@ -620,8 +728,8 @@ export default function CesiraV1(){
       if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),finalAccent,noteT);
       else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:p<4?p:p%2===0?12:3,finalAccent,noteT);}
       else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:p<6?p:p%2===0?13:5,finalAccent,noteT);}
-      else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',finalAccent,noteT);
-      else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',finalAccent,noteT);
+      else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',finalAccent,noteT,sd.len??1);
+      else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',finalAccent,noteT,sd.len??1);
       const flashDelay=Math.max(0,(noteT-audioRef.current.ctx.currentTime)*1000);
       window.setTimeout(()=>flashLane(lane,finalAccent),flashDelay);
       if(stutterOnRef.current&&Math.random()<0.16){const b=stutterBurstRef.current;for(let i=1;i<b;i++){const st=noteT+i*0.042;if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),0.62*ga,st);else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:3,0.62*ga,st);}else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:5,0.62*ga,st);}else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',0.62*ga,st);else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',0.62*ga,st);}}
@@ -904,7 +1012,7 @@ export default function CesiraV1(){
         {/* RIGHT PANEL */}
         <div style={{width:'256px',flexShrink:0,display:'flex',flexDirection:'column',background:B1,borderRadius:'10px',border:`1px solid ${BD}`,overflow:'hidden'}}>
           <div style={{display:'flex',borderBottom:`1px solid ${BD}`,flexShrink:0}}>
-            {[{id:'knobs',label:'Knobs'},{id:'lane',label:'Lane FX'},{id:'notes',label:'Notes'},{id:'save',label:'Save'}].map(({id,label})=>(
+            {[{id:'knobs',label:'Knobs'},{id:'lane',label:'Lane FX'},{id:'notes',label:'Notes'},{id:'sound',label:'Sound'},{id:'save',label:'Save'}].map(({id,label})=>(
               <button key={id} onClick={()=>setRightTab(id)}
                 style={{flex:1,padding:'5px 0',fontSize:'7.5px',fontWeight:900,letterSpacing:'0.12em',border:'none',background:rightTab===id?'rgba(52,211,153,0.07)':'transparent',color:rightTab===id?'#34d399':'#2d3d4d',cursor:'pointer',borderBottom:rightTab===id?'2px solid #34d399':'2px solid transparent',textTransform:'uppercase',transition:'color 0.1s'}}>
                 {label}
@@ -1024,6 +1132,73 @@ export default function CesiraV1(){
                 ))}
               </div>
             </>}
+
+            {rightTab==='sound'&&(()=>{
+              const lanes=['bass','synth'];
+              const [sdLane,setSdLane]=useState('bass'); // local tab
+              const sd=soundDesign[sdLane];
+              const lc=LANE_COLOR[sdLane];
+              const update=(k,v)=>setSoundDesign(prev=>({...prev,[sdLane]:{...prev[sdLane],[k]:v}}));
+              const oscTypes=['sine','triangle','square','sawtooth'];
+              const filterTypes=['lowpass','highpass','bandpass','notch'];
+              return(<>
+                <div style={{display:'flex',gap:'3px',marginBottom:'2px'}}>
+                  {lanes.map(l=><button key={l} onClick={()=>setSdLane(l)} style={{...pill(sdLane===l,LANE_COLOR[l]),padding:'3px 10px',fontSize:'8px'}}>{l.toUpperCase()}</button>)}
+                  <div style={{flex:1}}/>
+                  <button onClick={()=>update('active',!sd.active)}
+                    style={{...pill(sd.active,'#34d399'),padding:'3px 8px',fontSize:'8px',fontWeight:900}}>
+                    {sd.active?'● CUSTOM':'○ PRESET'}
+                  </button>
+                </div>
+                {!sd.active&&<div style={{fontSize:'7px',color:'#334155',padding:'4px',textAlign:'center',borderRadius:'4px',background:'rgba(255,255,255,0.02)',border:`1px solid ${BD}`}}>Abilita CUSTOM per usare il tuo suono invece del preset</div>}
+                <div style={{opacity:sd.active?1:0.4,pointerEvents:sd.active?'all':'none',display:'flex',flexDirection:'column',gap:'4px'}}>
+                  {/* Oscillators */}
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginBottom:'1px'}}>OSCILLATORI</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px'}}>
+                    <div>
+                      <div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 1</div>
+                      <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
+                        {oscTypes.map(w=><button key={w} onClick={()=>update('osc',w)} style={{...pill(sd.osc===w,lc),padding:'1px 4px',fontSize:'6.5px'}}>{w.slice(0,3)}</button>)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 2</div>
+                      <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
+                        {oscTypes.map(w=><button key={w} onClick={()=>update('osc2',w)} style={{...pill(sd.osc2===w,lc),padding:'1px 4px',fontSize:'6.5px'}}>{w.slice(0,3)}</button>)}
+                      </div>
+                    </div>
+                  </div>
+                  <Slider label="Detune (cents)" value={sd.detune} setValue={v=>update('detune',v)} min={0} max={50} step={1} fmt={v=>`${v}¢`} color={lc}/>
+                  {sdLane==='bass'&&<Slider label="Sub Mix" value={sd.sub} setValue={v=>update('sub',v)} color={lc}/>}
+                  {/* Filter */}
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>FILTRO</div>
+                  <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
+                    {filterTypes.map(f=><button key={f} onClick={()=>update('filterType',f)} style={{...pill(sd.filterType===f,lc),padding:'1px 4px',fontSize:'6.5px'}}>{f.slice(0,2).toUpperCase()}</button>)}
+                  </div>
+                  <Slider label="Cutoff" value={sd.cutoff} setValue={v=>update('cutoff',v)} color={lc}/>
+                  <Slider label="Resonance" value={sd.res} setValue={v=>update('res',v)} color={lc}/>
+                  {/* ADSR */}
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>ENVELOPE</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px'}}>
+                    <Slider label="Attack" value={sd.atk} setValue={v=>update('atk',v)} min={0.001} max={2} step={0.001} fmt={v=>v<0.1?`${Math.round(v*1000)}ms`:`${v.toFixed(2)}s`} color={lc}/>
+                    <Slider label="Decay" value={sd.dec} setValue={v=>update('dec',v)} min={0.01} max={3} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
+                    <Slider label="Sustain" value={sd.sus} setValue={v=>update('sus',v)} fmt={v=>`${Math.round(v*100)}%`} color={lc}/>
+                    <Slider label="Release" value={sd.rel} setValue={v=>update('rel',v)} min={0.01} max={6} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
+                  </div>
+                  {/* Drive + LFO */}
+                  <Slider label="Drive" value={sd.drive} setValue={v=>update('drive',v)} color={lc}/>
+                  {sdLane==='synth'&&<>
+                    <Slider label="LFO Amount" value={sd.lfo||0} setValue={v=>update('lfo',v)} color={lc}/>
+                    <Slider label="LFO Rate (Hz)" value={sd.lfoRate||3} setValue={v=>update('lfoRate',v)} min={0.1} max={20} step={0.1} fmt={v=>`${v.toFixed(1)}Hz`} color={lc}/>
+                  </>}
+                  {/* Preview button */}
+                  <button onClick={()=>{initAudio().then(()=>{const t=(audioRef.current?.ctx.currentTime||0)+0.01;if(sdLane==='bass')playBassAt(bassPreset,'C2',0.8,t,4);else playSynthAt(synthPreset,'C4',0.8,t,4);});}}
+                    style={{...pill(false,lc),padding:'6px',textAlign:'center',fontSize:'8px',fontWeight:900,marginTop:'2px'}}>
+                    ▶ Ascolta ({sdLane})
+                  </button>
+                </div>
+              </>);
+            })()}
 
             {rightTab==='save'&&<>
               <div style={{fontSize:'8px',color:'#34d399',background:'rgba(52,211,153,0.06)',borderRadius:'4px',padding:'4px 6px',fontWeight:700}}>
