@@ -294,6 +294,7 @@ export default function CesiraV1(){
   const [projectName,setProjectName]=useState('CESIRA Session');const [metronomeOn,setMetronomeOn]=useState(false);const [metronomeLevel,setMetronomeLevel]=useState(0.42);
   const [projectSlots,setProjectSlots]=useState([null,null,null,null]);const [currentProjectSlot,setCurrentProjectSlot]=useState(null);
   const [rightTab,setRightTab]=useState('knobs');
+  const [sdLane,setSdLane]=useState('bass'); // sound design lane selector — must be at component level
   const [laneVU,setLaneVU]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
@@ -803,7 +804,7 @@ export default function CesiraV1(){
   const tapTempo=()=>{const now=Date.now();setTapTimes(prev=>{const next=[...prev.filter(t=>now-t<3000),now];if(next.length>=2){const intervals=next.slice(1).map((t,i)=>t-next[i]);const avg=intervals.reduce((a,b)=>a+b,0)/intervals.length;const newBpm=clamp(Math.round(60000/avg),60,200);setBpm(newBpm);setStatusText(`TAP → ${newBpm} BPM`);}return next.slice(-6);});};
 
   // ─── Save/Load ────────────────────────────────────────────────────────────
-  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex});
+  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex,soundDesign});
   const applySnapshot=(snap,label='Loaded.')=>{
     if(!snap)return;stopClock();if(snap.projectName)setProjectName(snap.projectName);
     const n=(k,s)=>typeof snap[k]==='number'&&s(snap[k]),b=(k,s)=>typeof snap[k]==='boolean'&&s(snap[k]);
@@ -811,6 +812,7 @@ export default function CesiraV1(){
     b('stutterOn',setStutterOn);b('metronomeOn',setMetronomeOn);
     if(snap.harmonicProfile)setHarmonicProfile(snap.harmonicProfile);if(snap.grooveProfile)setGrooveProfile(snap.grooveProfile);if(snap.sectionProfile)setSectionProfile(snap.sectionProfile);if(snap.bassWave)setBassWave(snap.bassWave);if(snap.synthWave)setSynthWave(snap.synthWave);
     if(snap.laneStepCounts)setLaneStepCounts(snap.laneStepCounts);if(snap.patterns)setPatterns(snap.patterns);if(snap.bassLine)setBassLine(snap.bassLine);if(snap.synthLine)setSynthLine(snap.synthLine);if(snap.laneFx)setLaneFx(snap.laneFx);if(snap.laneVolumes)setLaneVolumes(snap.laneVolumes);
+    if(snap.soundDesign)setSoundDesign(snap.soundDesign);
     setStatusText(label);
   };
   const saveScene=slot=>{setSceneSlots(prev=>prev.map((v,i)=>i===slot?serializeScene():v));setCurrentScene(slot);setStatusText(`Scene ${slot+1} saved.`);};
@@ -1134,8 +1136,6 @@ export default function CesiraV1(){
             </>}
 
             {rightTab==='sound'&&(()=>{
-              const lanes=['bass','synth'];
-              const [sdLane,setSdLane]=useState('bass'); // local tab
               const sd=soundDesign[sdLane];
               const lc=LANE_COLOR[sdLane];
               const update=(k,v)=>setSoundDesign(prev=>({...prev,[sdLane]:{...prev[sdLane],[k]:v}}));
@@ -1143,17 +1143,16 @@ export default function CesiraV1(){
               const filterTypes=['lowpass','highpass','bandpass','notch'];
               return(<>
                 <div style={{display:'flex',gap:'3px',marginBottom:'2px'}}>
-                  {lanes.map(l=><button key={l} onClick={()=>setSdLane(l)} style={{...pill(sdLane===l,LANE_COLOR[l]),padding:'3px 10px',fontSize:'8px'}}>{l.toUpperCase()}</button>)}
+                  {['bass','synth'].map(l=><button key={l} onClick={()=>setSdLane(l)} style={{...pill(sdLane===l,LANE_COLOR[l]),padding:'3px 10px',fontSize:'8px'}}>{l.toUpperCase()}</button>)}
                   <div style={{flex:1}}/>
                   <button onClick={()=>update('active',!sd.active)}
                     style={{...pill(sd.active,'#34d399'),padding:'3px 8px',fontSize:'8px',fontWeight:900}}>
                     {sd.active?'● CUSTOM':'○ PRESET'}
                   </button>
                 </div>
-                {!sd.active&&<div style={{fontSize:'7px',color:'#334155',padding:'4px',textAlign:'center',borderRadius:'4px',background:'rgba(255,255,255,0.02)',border:`1px solid ${BD}`}}>Abilita CUSTOM per usare il tuo suono invece del preset</div>}
+                {!sd.active&&<div style={{fontSize:'7px',color:'#334155',padding:'5px',textAlign:'center',borderRadius:'4px',background:'rgba(255,255,255,0.02)',border:`1px solid ${BD}`}}>Attiva CUSTOM per usare il tuo suono al posto del preset</div>}
                 <div style={{opacity:sd.active?1:0.4,pointerEvents:sd.active?'all':'none',display:'flex',flexDirection:'column',gap:'4px'}}>
-                  {/* Oscillators */}
-                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginBottom:'1px'}}>OSCILLATORI</div>
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase'}}>OSCILLATORI</div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px'}}>
                     <div>
                       <div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 1</div>
@@ -1169,32 +1168,28 @@ export default function CesiraV1(){
                     </div>
                   </div>
                   <Slider label="Detune (cents)" value={sd.detune} setValue={v=>update('detune',v)} min={0} max={50} step={1} fmt={v=>`${v}¢`} color={lc}/>
-                  {sdLane==='bass'&&<Slider label="Sub Mix" value={sd.sub} setValue={v=>update('sub',v)} color={lc}/>}
-                  {/* Filter */}
+                  {sdLane==='bass'&&<Slider label="Sub Mix" value={sd.sub??0.5} setValue={v=>update('sub',v)} color={lc}/>}
                   <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>FILTRO</div>
                   <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
                     {filterTypes.map(f=><button key={f} onClick={()=>update('filterType',f)} style={{...pill(sd.filterType===f,lc),padding:'1px 4px',fontSize:'6.5px'}}>{f.slice(0,2).toUpperCase()}</button>)}
                   </div>
                   <Slider label="Cutoff" value={sd.cutoff} setValue={v=>update('cutoff',v)} color={lc}/>
                   <Slider label="Resonance" value={sd.res} setValue={v=>update('res',v)} color={lc}/>
-                  {/* ADSR */}
-                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>ENVELOPE</div>
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>ENVELOPE ADSR</div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px'}}>
                     <Slider label="Attack" value={sd.atk} setValue={v=>update('atk',v)} min={0.001} max={2} step={0.001} fmt={v=>v<0.1?`${Math.round(v*1000)}ms`:`${v.toFixed(2)}s`} color={lc}/>
                     <Slider label="Decay" value={sd.dec} setValue={v=>update('dec',v)} min={0.01} max={3} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
                     <Slider label="Sustain" value={sd.sus} setValue={v=>update('sus',v)} fmt={v=>`${Math.round(v*100)}%`} color={lc}/>
                     <Slider label="Release" value={sd.rel} setValue={v=>update('rel',v)} min={0.01} max={6} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
                   </div>
-                  {/* Drive + LFO */}
                   <Slider label="Drive" value={sd.drive} setValue={v=>update('drive',v)} color={lc}/>
                   {sdLane==='synth'&&<>
-                    <Slider label="LFO Amount" value={sd.lfo||0} setValue={v=>update('lfo',v)} color={lc}/>
+                    <Slider label="LFO Cutoff" value={sd.lfo||0} setValue={v=>update('lfo',v)} color={lc}/>
                     <Slider label="LFO Rate (Hz)" value={sd.lfoRate||3} setValue={v=>update('lfoRate',v)} min={0.1} max={20} step={0.1} fmt={v=>`${v.toFixed(1)}Hz`} color={lc}/>
                   </>}
-                  {/* Preview button */}
-                  <button onClick={()=>{initAudio().then(()=>{const t=(audioRef.current?.ctx.currentTime||0)+0.01;if(sdLane==='bass')playBassAt(bassPreset,'C2',0.8,t,4);else playSynthAt(synthPreset,'C4',0.8,t,4);});}}
-                    style={{...pill(false,lc),padding:'6px',textAlign:'center',fontSize:'8px',fontWeight:900,marginTop:'2px'}}>
-                    ▶ Ascolta ({sdLane})
+                  <button onClick={()=>{initAudio().then(()=>{const t=(audioRef.current?.ctx.currentTime||0)+0.01;if(sdLane==='bass')playBassAt(bassPreset,'C2',0.85,t,4);else playSynthAt(synthPreset,'C4',0.85,t,4);});}}
+                    style={{...pill(false,lc),padding:'6px',textAlign:'center',fontSize:'9px',fontWeight:900,marginTop:'2px'}}>
+                    ▶ Ascolta {sdLane}
                   </button>
                 </div>
               </>);
