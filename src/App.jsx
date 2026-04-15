@@ -90,39 +90,48 @@ const MODES={
 // Chord functions — each chord picks notes from mode scale degrees
 const CHORD_PROGRESSIONS = {
   minor: [
-    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i-vi-iv-v
-    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2},{root:0,third:2,fifth:4}], // i-iv-v-i
-    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:6,third:1,fifth:3},{root:4,third:0,fifth:2}], // i-vi-vii-v
-    [{root:0,third:2,fifth:4},{root:2,third:4,fifth:6},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i-iii-iv-v
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i–VI–iv–v
+    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2},{root:0,third:2,fifth:4}], // i–iv–v–i
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:6,third:1,fifth:3},{root:4,third:0,fifth:2}], // i–VI–VII–v
+    [{root:0,third:2,fifth:4},{root:2,third:4,fifth:6},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i–III–iv–v
+    [{root:0,third:2,fifth:4},{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:3,third:5,fifth:0}], // i–i–iv–iv (hypnotic)
+    [{root:0,third:2,fifth:4},{root:4,third:0,fifth:2},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3}], // i–v–iv–VII
   ],
   phrygian:[
     [{root:0,third:1,fifth:3},{root:1,third:3,fifth:5},{root:3,third:5,fifth:0},{root:1,third:3,fifth:5}],
     [{root:0,third:1,fifth:3},{root:6,third:1,fifth:3},{root:3,third:5,fifth:0},{root:0,third:1,fifth:3}],
+    [{root:0,third:1,fifth:3},{root:0,third:1,fifth:3},{root:1,third:3,fifth:5},{root:1,third:3,fifth:5}], // static phrygian drone
   ],
   dorian:[
     [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}],
     [{root:0,third:2,fifth:4},{root:1,third:3,fifth:5},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3}],
+    [{root:0,third:2,fifth:4},{root:4,third:6,fifth:1},{root:3,third:5,fifth:0},{root:0,third:2,fifth:4}], // dorian vamp
   ],
   mixo:[
     [{root:0,third:2,fifth:4},{root:6,third:1,fifth:3},{root:4,third:6,fifth:1},{root:0,third:2,fifth:4}],
     [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3},{root:4,third:6,fifth:1}],
+    [{root:0,third:2,fifth:4},{root:0,third:2,fifth:4},{root:6,third:1,fifth:3},{root:6,third:1,fifth:3}], // mixo shuffle
   ],
   lydian:[
     [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:6,fifth:1},{root:2,third:4,fifth:6}],
+    [{root:0,third:2,fifth:4},{root:2,third:4,fifth:6},{root:3,third:5,fifth:0},{root:0,third:2,fifth:4}],
   ],
   chroma:[
     [{root:0,third:1,fifth:4},{root:3,third:6,fifth:1},{root:7,third:2,fifth:5},{root:4,third:9,fifth:2}],
+    [{root:0,third:3,fifth:6},{root:1,third:4,fifth:7},{root:2,third:5,fifth:8},{root:0,third:3,fifth:6}], // chromatic sequence
   ],
 };
 
-// Section archetypes — how a "part" of a song feels
+// Section archetypes — musical character of each part
 const SECTION_ARCHETYPES = {
-  intro:    {kickMult:0.5,snareMult:0.4,hatMult:0.6,bassMult:0.7,synthMult:0.5,velCurve:'rise',probFloor:0.55,lenBias:2},
-  build:    {kickMult:0.75,snareMult:0.6,hatMult:0.9,bassMult:0.9,synthMult:0.7,velCurve:'rise',probFloor:0.65,lenBias:1.5},
-  drop:     {kickMult:1.2,snareMult:1.0,hatMult:1.0,bassMult:1.1,synthMult:0.9,velCurve:'accent',probFloor:0.8,lenBias:1},
-  groove:   {kickMult:1.0,snareMult:1.0,hatMult:1.1,bassMult:1.0,synthMult:1.0,velCurve:'groove',probFloor:0.75,lenBias:1},
-  break:    {kickMult:0.3,snareMult:0.5,hatMult:0.4,bassMult:0.6,synthMult:1.2,velCurve:'flat',probFloor:0.5,lenBias:3},
-  outro:    {kickMult:0.6,snareMult:0.5,hatMult:0.5,bassMult:0.5,synthMult:0.6,velCurve:'fall',probFloor:0.45,lenBias:2},
+  intro:    {kickMult:0.4,snareMult:0.3,hatMult:0.5,bassMult:0.6,synthMult:0.7,velCurve:'rise',probFloor:0.5,lenBias:2.5},
+  build:    {kickMult:0.8,snareMult:0.7,hatMult:1.1,bassMult:1.0,synthMult:0.8,velCurve:'rise',probFloor:0.65,lenBias:1.5},
+  drop:     {kickMult:1.3,snareMult:1.1,hatMult:0.9,bassMult:1.2,synthMult:0.8,velCurve:'accent',probFloor:0.82,lenBias:1},
+  groove:   {kickMult:1.0,snareMult:1.0,hatMult:1.0,bassMult:1.0,synthMult:0.9,velCurve:'groove',probFloor:0.72,lenBias:1.2},
+  break:    {kickMult:0.2,snareMult:0.4,hatMult:0.3,bassMult:0.5,synthMult:1.4,velCurve:'flat',probFloor:0.45,lenBias:4},
+  outro:    {kickMult:0.5,snareMult:0.4,hatMult:0.4,bassMult:0.4,synthMult:0.5,velCurve:'fall',probFloor:0.4,lenBias:2.5},
+  tension:  {kickMult:0.6,snareMult:0.8,hatMult:1.3,bassMult:1.1,synthMult:1.2,velCurve:'accent',probFloor:0.6,lenBias:1.5}, // sparse kick, lots of hat
+  fill:     {kickMult:1.5,snareMult:1.4,hatMult:0.7,bassMult:0.8,synthMult:0.5,velCurve:'accent',probFloor:0.7,lenBias:0.75}, // dense drums, short notes
 };
 
 // Voice leading: move by smallest interval in scale
@@ -189,12 +198,12 @@ function chooseGroove(density,chaos){
   return'steady';
 }
 function chooseSection(density,chaos,iterCount){
-  // iterCount: how many times Freestyle/AutoJam has been pressed this session
   if(iterCount===0)return seededChoice(['intro','groove']);
-  if(density<0.3)return seededChoice(['break','intro']);
-  if(density>0.75&&chaos>0.5)return seededChoice(['drop','drop','groove']);
-  if(density>0.55)return seededChoice(['groove','build','drop']);
-  return seededChoice(['groove','break','build']);
+  if(density<0.25)return seededChoice(['break','intro','outro']);
+  if(density>0.78&&chaos>0.55)return seededChoice(['drop','drop','fill','tension']);
+  if(density>0.55&&chaos>0.4)return seededChoice(['groove','build','drop','tension']);
+  if(chaos>0.65)return seededChoice(['tension','break','groove']);
+  return seededChoice(['groove','break','build','fill']);
 }
 
 function buildNoteLanes(stepCount, modeName, grooveName, chaos, progression, arpeMode, sectionType){
@@ -568,70 +577,89 @@ export default function CesiraV1(){
     node.curve=c;node.oversample='2x';
   };
 
-  const makeReverbIR=(ctx,duration=1.2,decay=2.5)=>{const sr=ctx.sampleRate,len=Math.floor(sr*duration);const buf=ctx.createBuffer(2,len,sr);for(let ch=0;ch<2;ch++){const d=buf.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);}return buf;};
+  const makeReverbIR=(ctx,duration=1.0,decay=2.8)=>{const sr=ctx.sampleRate,len=Math.floor(sr*duration);const buf=ctx.createBuffer(2,len,sr);for(let ch=0;ch<2;ch++){const d=buf.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);}return buf;};
 
   const initAudio=async()=>{
     if(audioRef.current){await audioRef.current.ctx.resume();setIsReady(true);return;}
     const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
     const ctx=new AudioCtx({sampleRate:44100,latencyHint:'interactive'});
-    const inputBus=ctx.createGain();inputBus.gain.value=0.82;
+    // ─ Gain staging: every bus is significantly lower than 1.0 to prevent accumulation ─
+    const inputBus=ctx.createGain();inputBus.gain.value=0.7; // lower headroom
     const preDrive=ctx.createWaveShaper();
-    const toneFilter=ctx.createBiquadFilter();toneFilter.type='lowpass';toneFilter.frequency.value=16000;toneFilter.Q.value=0.5;
-    const compressor=ctx.createDynamicsCompressor();compressor.threshold.value=-18;compressor.knee.value=12;compressor.ratio.value=4;compressor.attack.value=0.005;compressor.release.value=0.12;
-    const limiter=ctx.createDynamicsCompressor();limiter.threshold.value=-2;limiter.knee.value=0;limiter.ratio.value=20;limiter.attack.value=0.001;limiter.release.value=0.05;
-    const dry=ctx.createGain(),wet=ctx.createGain(),splitter=ctx.createChannelSplitter(2),merger=ctx.createChannelMerger(2);
+    const toneFilter=ctx.createBiquadFilter();toneFilter.type='lowpass';toneFilter.frequency.value=16000;toneFilter.Q.value=0.4;
+    // Gentle compressor — only controls peaks, not color
+    const compressor=ctx.createDynamicsCompressor();
+    compressor.threshold.value=-24;compressor.knee.value=18;compressor.ratio.value=3;compressor.attack.value=0.008;compressor.release.value=0.2;
+    // True brick-wall limiter
+    const limiter=ctx.createDynamicsCompressor();
+    limiter.threshold.value=-3;limiter.knee.value=0;limiter.ratio.value=20;limiter.attack.value=0.001;limiter.release.value=0.04;
+    // Stereo delay — wet very low by default
+    const dry=ctx.createGain(),wet=ctx.createGain();
+    dry.gain.value=1.0;wet.gain.value=0.0;
+    const splitter=ctx.createChannelSplitter(2),merger=ctx.createChannelMerger(2);
     const leftDelay=ctx.createDelay(0.5),rightDelay=ctx.createDelay(0.5),feedback=ctx.createGain(),toneEcho=ctx.createBiquadFilter();
-    toneEcho.type='lowpass';toneEcho.frequency.value=5000;
-    const output=ctx.createGain();
-    const analyser=ctx.createAnalyser();analyser.fftSize=512;analyser.smoothingTimeConstant=0.8;
-    const dest=ctx.createMediaStreamDestination();
-    // Chorus
+    toneEcho.type='lowpass';toneEcho.frequency.value=4800;feedback.gain.value=0.15;
+    // Chorus — static delays only, NO oscillators running idle in background
     const chorusWet=ctx.createGain();chorusWet.gain.value=0.0;
-    const cDel1=ctx.createDelay(0.05),cDel2=ctx.createDelay(0.05);
-    const cLfo1=ctx.createOscillator(),cLfo2=ctx.createOscillator();
-    const cLg1=ctx.createGain(),cLg2=ctx.createGain();
-    cLfo1.frequency.value=0.9;cLfo2.frequency.value=1.3;cLg1.gain.value=0.003;cLg2.gain.value=0.004;
+    const cDel1=ctx.createDelay(0.025),cDel2=ctx.createDelay(0.031);
     cDel1.delayTime.value=0.025;cDel2.delayTime.value=0.031;
-    cLfo1.connect(cLg1);cLg1.connect(cDel1.delayTime);cLfo2.connect(cLg2);cLg2.connect(cDel2.delayTime);
-    cLfo1.start();cLfo2.start();
-    // Reverb
-    const reverb=ctx.createConvolver();reverb.buffer=makeReverbIR(ctx,1.4,2.2);
+    // Reverb plate
+    const reverb=ctx.createConvolver();reverb.buffer=makeReverbIR(ctx,1.0,2.8);
     const reverbWet=ctx.createGain();reverbWet.gain.value=0.0;
+    const output=ctx.createGain();output.gain.value=0.9;
+    const analyser=ctx.createAnalyser();analyser.fftSize=512;analyser.smoothingTimeConstant=0.82;
+    const dest=ctx.createMediaStreamDestination();
+    // Routing
     inputBus.connect(preDrive);preDrive.connect(toneFilter);toneFilter.connect(compressor);
     compressor.connect(dry);compressor.connect(splitter);
-    compressor.connect(cDel1);compressor.connect(cDel2);cDel1.connect(chorusWet);cDel2.connect(chorusWet);
+    // Chorus (static delay, no idle oscillators)
+    compressor.connect(cDel1);compressor.connect(cDel2);
+    cDel1.connect(chorusWet);cDel2.connect(chorusWet);
+    // Reverb
     compressor.connect(reverb);reverb.connect(reverbWet);
-    splitter.connect(leftDelay,0);splitter.connect(rightDelay,1);rightDelay.connect(toneEcho);toneEcho.connect(feedback);feedback.connect(leftDelay);
+    // Stereo delay
+    splitter.connect(leftDelay,0);splitter.connect(rightDelay,1);
+    rightDelay.connect(toneEcho);toneEcho.connect(feedback);feedback.connect(leftDelay);
     leftDelay.connect(merger,0,0);rightDelay.connect(merger,0,1);merger.connect(wet);
     dry.connect(output);wet.connect(output);chorusWet.connect(output);reverbWet.connect(output);
     output.connect(limiter);limiter.connect(analyser);limiter.connect(ctx.destination);limiter.connect(dest);
-    audioRef.current={ctx,inputBus,preDrive,toneFilter,compressor,limiter,dry,wet,leftDelay,rightDelay,feedback,output,analyser,dest,chorusWet,reverbWet,cLfo1,cLfo2};
+    audioRef.current={ctx,inputBus,preDrive,toneFilter,compressor,limiter,dry,wet,leftDelay,rightDelay,feedback,output,analyser,dest,chorusWet,reverbWet};
     setScopeAnalyser(analyser);
-    setDriveCurve(preDrive,fxScenes[fxPreset].drive*0.5);
+    // Start with identity drive curve (no distortion by default)
+    const flat=new Float32Array(512);for(let i=0;i<512;i++){const x=(i*2)/512-1;flat[i]=x;}preDrive.curve=flat;
     setIsReady(true);setStatusText('Audio online.');applyFxScene(fxPreset,false,ctx.currentTime);
   };
 
   const applyFxScene=(idx,flash=true,nowTime)=>{
     setFxPreset(idx);const audio=audioRef.current;if(!audio)return;
     const fx=fxScenes[idx],now=nowTime??audio.ctx.currentTime,macro=macroKnobRef.current;
-    setDriveCurve(audio.preDrive,(fx.drive*0.5)+noise*0.07+macro*0.05);
-    audio.toneFilter.frequency.cancelScheduledValues(now);audio.toneFilter.frequency.linearRampToValueAtTime(2200+12000*fx.filter*tone+macro*1000,now+0.04);
+    // Drive: never exceed 0.35 to prevent distortion scorcio
+    const driveAmt=clamp(fx.drive*0.35+noise*0.04+macro*0.03,0,0.35);
+    setDriveCurve(audio.preDrive,driveAmt);
+    audio.toneFilter.frequency.cancelScheduledValues(now);
+    audio.toneFilter.frequency.linearRampToValueAtTime(clamp(2000+11000*fx.filter*tone,800,18000),now+0.06);
     audio.leftDelay.delayTime.cancelScheduledValues(now);audio.rightDelay.delayTime.cancelScheduledValues(now);
-    audio.leftDelay.delayTime.linearRampToValueAtTime(0.02+fx.delay*0.16+space*0.02,now+0.04);
-    audio.rightDelay.delayTime.linearRampToValueAtTime(0.03+fx.delay*0.21+space*0.035,now+0.04);
-    audio.feedback.gain.cancelScheduledValues(now);audio.feedback.gain.linearRampToValueAtTime(clamp(0.1+space*0.18+fx.delay*0.22+macro*0.05,0.05,0.42),now+0.04);
+    audio.leftDelay.delayTime.linearRampToValueAtTime(clamp(0.02+fx.delay*0.15+space*0.02,0.01,0.45),now+0.06);
+    audio.rightDelay.delayTime.linearRampToValueAtTime(clamp(0.03+fx.delay*0.2+space*0.03,0.01,0.45),now+0.06);
+    audio.feedback.gain.cancelScheduledValues(now);
+    audio.feedback.gain.linearRampToValueAtTime(clamp(0.08+space*0.14+fx.delay*0.18,0.04,0.38),now+0.06);
     audio.wet.gain.cancelScheduledValues(now);audio.dry.gain.cancelScheduledValues(now);
-    audio.wet.gain.linearRampToValueAtTime(clamp(fx.width*0.3+space*0.16+macro*0.05,0.04,0.38),now+0.04);
-    audio.dry.gain.linearRampToValueAtTime(clamp(0.9-fx.width*0.12-macro*0.04,0.62,0.94),now+0.04);
-    // Chorus — driven by space
-    if(audio.chorusWet)audio.chorusWet.gain.linearRampToValueAtTime(clamp(space*0.18+fx.width*0.1,0,0.28),now+0.08);
-    // Reverb — driven by space + fx
-    if(audio.reverbWet)audio.reverbWet.gain.linearRampToValueAtTime(clamp(space*0.22+fx.width*0.08,0,0.32),now+0.1);
-    audio.output.gain.cancelScheduledValues(now);audio.output.gain.linearRampToValueAtTime(master,now+0.04);
+    audio.wet.gain.linearRampToValueAtTime(clamp(fx.width*0.22+space*0.12,0.0,0.28),now+0.06);
+    audio.dry.gain.linearRampToValueAtTime(clamp(0.95-fx.width*0.1,0.7,0.97),now+0.06);
+    if(audio.chorusWet)audio.chorusWet.gain.linearRampToValueAtTime(clamp(space*0.1+fx.width*0.06,0,0.18),now+0.1);
+    if(audio.reverbWet)audio.reverbWet.gain.linearRampToValueAtTime(clamp(space*0.15+fx.width*0.06,0,0.24),now+0.12);
+    audio.output.gain.cancelScheduledValues(now);audio.output.gain.linearRampToValueAtTime(clamp(master,0.1,1),now+0.06);
   };
   useEffect(()=>{if(!audioRef.current)return;applyFxScene(fxPreset,false);},[fxPreset,tone,space,noise]);
   useEffect(()=>{const a=audioRef.current;if(!a)return;a.output.gain.setTargetAtTime(master,a.ctx.currentTime,0.03);},[master]);
-  useEffect(()=>{const a=audioRef.current;if(!a)return;const n=a.ctx.currentTime;a.compressor.threshold.setTargetAtTime(-10-compressAmount*16,n,0.04);a.compressor.ratio.setTargetAtTime(2+compressAmount*6,n,0.04);a.compressor.attack.setTargetAtTime(0.003+(1-compressAmount)*0.02,n,0.04);a.compressor.release.setTargetAtTime(0.06+compressAmount*0.2,n,0.04);a.compressor.knee.setTargetAtTime(6+compressAmount*16,n,0.04);},[compressAmount]);
+  useEffect(()=>{const a=audioRef.current;if(!a)return;const n=a.ctx.currentTime;
+    // Gentler compressor — more transparent, less pumping
+    a.compressor.threshold.setTargetAtTime(clamp(-18-compressAmount*14,compressAmount>0?-32:-18,-6),n,0.06);
+    a.compressor.ratio.setTargetAtTime(clamp(2+compressAmount*5,1.5,8),n,0.06);
+    a.compressor.attack.setTargetAtTime(0.006+(1-compressAmount)*0.024,n,0.06);
+    a.compressor.release.setTargetAtTime(0.1+compressAmount*0.18,n,0.06);
+    a.compressor.knee.setTargetAtTime(clamp(10+compressAmount*14,8,24),n,0.06);
+  },[compressAmount]);
 
   const getLaneGain=(lane)=>{
     const audio=audioRef.current;if(!audio)return null;
@@ -642,17 +670,31 @@ export default function CesiraV1(){
   const routeLaneFx=(sourceNode,lane)=>{
     const audio=audioRef.current;if(!audio)return[];
     const macro=macroKnobRef.current,fx=laneFxRef.current[lane]||{drive:0,tone:0.7,echo:0,crush:0,pan:0};
-    const ld=audio.ctx.createWaveShaper(),lt=audio.ctx.createBiquadFilter(),echo=audio.ctx.createDelay(0.35),eg=audio.ctx.createGain(),et=audio.ctx.createBiquadFilter(),pan=audio.ctx.createStereoPanner();
-    setDriveCurve(ld,clamp(fx.drive*0.55+macro*0.07,0,0.75));
-    lt.type=lane==='hat'?'highpass':'lowpass';lt.frequency.value=lane==='hat'?1400+fx.tone*7000:200+fx.tone*6500;lt.Q.value=0.4+fx.crush*1.4;
-    echo.delayTime.value=0.04+fx.echo*0.19;eg.gain.value=clamp(fx.echo*0.2,0,0.3);et.type='lowpass';et.frequency.value=1400+fx.tone*3800;pan.pan.value=clamp(fx.pan,-1,1);
+    const ld=audio.ctx.createWaveShaper(),lt=audio.ctx.createBiquadFilter();
+    const echo=audio.ctx.createDelay(0.35),eg=audio.ctx.createGain(),et=audio.ctx.createBiquadFilter();
+    const pan=audio.ctx.createStereoPanner();
+    // Drive capped at 0.4 — above that it clips badly in dense patterns
+    const driveAmt=clamp(fx.drive*0.35+macro*0.04,0,0.4);
+    setDriveCurve(ld,driveAmt);
+    lt.type=lane==='hat'?'highpass':'lowpass';
+    lt.frequency.value=lane==='hat'?1200+fx.tone*8000:150+fx.tone*7000;
+    lt.Q.value=0.3+fx.crush*1.2;
+    echo.delayTime.value=clamp(0.04+fx.echo*0.18,0.01,0.34);
+    eg.gain.value=clamp(fx.echo*0.16,0,0.25);
+    et.type='lowpass';et.frequency.value=1200+fx.tone*3500;
+    pan.pan.value=clamp(fx.pan,-1,1);
     const dest=getLaneGain(lane)||audio.inputBus;
     sourceNode.connect(ld);ld.connect(lt);lt.connect(pan);pan.connect(dest);
     if(fx.echo>0.01){lt.connect(echo);echo.connect(et);et.connect(eg);eg.connect(pan);}
     return[ld,lt,echo,eg,et,pan];
   };
 
-  const rampEnv=(param,now,attack,decay,peak,end=0.0001)=>{param.cancelScheduledValues(now);param.setValueAtTime(0.0001,now);param.exponentialRampToValueAtTime(Math.max(0.0001,peak),now+Math.max(0.001,attack));param.exponentialRampToValueAtTime(Math.max(0.0001,end),now+Math.max(0.002,attack+decay));};
+  const rampEnv=(param,now,attack,decay,peak,end=0.0001)=>{
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(0,now); // start from true zero — no pop
+    param.linearRampToValueAtTime(Math.max(0.0001,peak),now+Math.max(0.002,attack));
+    param.exponentialRampToValueAtTime(Math.max(0.0001,end),now+Math.max(0.004,attack+decay));
+  };
   const createNoise=(len=0.2,amount=1)=>{const a=audioRef.current;const buf=a.ctx.createBuffer(1,Math.floor(a.ctx.sampleRate*len),a.ctx.sampleRate);const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*amount;return buf;};
   const safeStart=(n,t)=>{try{n.start(t);}catch{}};const safeStop=(n,t)=>{try{n.stop(t);}catch{}};
   const cleanup=(src,nodes,ms)=>{const fn=()=>[src,...nodes].forEach(n=>{try{n.disconnect();}catch{}});src.onended=fn;setTimeout(fn,ms);};
@@ -698,16 +740,65 @@ export default function CesiraV1(){
     const nb=createColoredNoise(0.2,0.22+noise*0.55,noiseColor);
 
     if(p.type.startsWith('kick')){
-      const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain(),sh=audio.ctx.createWaveShaper();
-      setDriveCurve(sh,0.12+noise*0.12);
-      osc.type=p.type==='kick'?'sine':'triangle';
-      const kickFreq=ds.kickFreq||(p.type==='kick'?108:88);
-      const kickEnd=ds.kickEnd||40;
-      const envTime=clamp(ds.pitchEnvTime??0.12,0.04,0.5);
-      osc.frequency.setValueAtTime(kickFreq,t);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(30,kickEnd),t+envTime);
-      rampEnv(g.gain,t,0.001,0.1+drumDecay*0.2,0.88*accent);
-      osc.connect(sh);sh.connect(g);const fx=routeLaneFx(g,'kick');cleanup(osc,[g,sh,...fx],600);safeStart(osc,t);safeStop(osc,t+0.26);return;
+      // ── Dual-oscillator kick ──
+      // 1. Body oscillator: sine with exponential pitch sweep (the classic)
+      // 2. Sub oscillator: pitched one octave below, adds fundamental weight
+      // 3. Click transient: very short noise burst for attack definition
+      const body=audio.ctx.createOscillator();
+      const bodyG=audio.ctx.createGain();
+      const sub=audio.ctx.createOscillator();
+      const subG=audio.ctx.createGain();
+      const clickSrc=audio.ctx.createBufferSource();
+      const clickG=audio.ctx.createGain();
+      const masterG=audio.ctx.createGain();
+      const sh=audio.ctx.createWaveShaper();
+
+      const kickFreq=ds.kickFreq||(p.type==='kick'?100:80);
+      const kickEnd=Math.max(20,ds.kickEnd||36);
+      const envTime=clamp(ds.pitchEnvTime??0.10,0.03,0.4);
+      const decayTime=0.18+drumDecay*0.28;
+
+      body.type='sine';
+      body.frequency.setValueAtTime(kickFreq,t);
+      body.frequency.exponentialRampToValueAtTime(kickEnd,t+envTime);
+
+      sub.type='sine';
+      sub.frequency.setValueAtTime(kickFreq*0.5,t);
+      sub.frequency.exponentialRampToValueAtTime(kickEnd*0.5,t+envTime);
+
+      // Click: 2ms white noise burst
+      const clickBuf=audio.ctx.createBuffer(1,Math.floor(audio.ctx.sampleRate*0.004),audio.ctx.sampleRate);
+      const cd=clickBuf.getChannelData(0);for(let i=0;i<cd.length;i++)cd[i]=(Math.random()*2-1);
+      clickSrc.buffer=clickBuf;
+
+      // Very light saturation — only on body, not sub
+      setDriveCurve(sh,0.06+noise*0.08);
+
+      // Envelopes — all start from silence to avoid pops
+      bodyG.gain.setValueAtTime(0,t);
+      bodyG.gain.linearRampToValueAtTime(0.82*accent,t+0.001);
+      bodyG.gain.exponentialRampToValueAtTime(0.001,t+decayTime);
+
+      subG.gain.setValueAtTime(0,t);
+      subG.gain.linearRampToValueAtTime(0.55*accent*bassSubAmount,t+0.001);
+      subG.gain.exponentialRampToValueAtTime(0.001,t+decayTime*1.2);
+
+      clickG.gain.setValueAtTime(0,t);
+      clickG.gain.linearRampToValueAtTime(0.35*accent*(1+noise*0.4),t+0.0005);
+      clickG.gain.exponentialRampToValueAtTime(0.001,t+0.006);
+
+      body.connect(sh);sh.connect(bodyG);
+      sub.connect(subG);
+      clickSrc.connect(clickG);
+      bodyG.connect(masterG);subG.connect(masterG);clickG.connect(masterG);
+
+      const fxn=routeLaneFx(masterG,'kick');
+      const dur=decayTime+0.08;
+      const cleanMs=dur*1000+200;
+      cleanup(body,[sub,clickSrc,bodyG,subG,clickG,masterG,sh,...fxn],cleanMs);
+      safeStart(body,t);safeStart(sub,t);safeStart(clickSrc,t);
+      safeStop(body,t+dur);safeStop(sub,t+dur+0.04);safeStop(clickSrc,t+0.008);
+      return;
     }
     if(p.type==='tom'){
       const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='sine';
@@ -727,11 +818,10 @@ export default function CesiraV1(){
     src.playbackRate.value=0.97+Math.random()*0.06;src.connect(fil);fil.connect(g);const fxn=routeLaneFx(g,resolveDrumFx(p.type));cleanup(src,[fil,g,...fxn],750);safeStart(src,t);safeStop(src,t+0.2);
   };
 
-  // Active node counter — hard cap to prevent audio thread overload
   const activeNodesRef=useRef(0);
-  const MAX_NODES=120;
-  const nodeGuard=()=>{if(activeNodesRef.current>=MAX_NODES)return false;return true;};
-  const trackNode=(n,ms)=>{activeNodesRef.current++;setTimeout(()=>{activeNodesRef.current=Math.max(0,activeNodesRef.current-1);},ms+100);};
+  const MAX_NODES=80; // reduced — fewer voices at once = cleaner sound
+  const nodeGuard=()=>activeNodesRef.current<MAX_NODES;
+  const trackNode=(n,ms)=>{activeNodesRef.current++;setTimeout(()=>{activeNodesRef.current=Math.max(0,activeNodesRef.current-1);},ms+80);};
 
   // stepSec: real duration of a step at current BPM
   const stepSec=()=>(60/bpmRef.current)/4;
@@ -763,10 +853,10 @@ export default function CesiraV1(){
       sub.gain.value=sd.sub;fil.type=sd.filterType;
       fil.frequency.setValueAtTime(80+sd.cutoff*4000,t);fil.Q.value=0.5+sd.res*8;
       setDriveCurve(driveN,sd.drive);
-      g.gain.setValueAtTime(0.0001,t);
-      g.gain.linearRampToValueAtTime(0.72*accent,t+atkT);
-      g.gain.setValueAtTime(0.72*accent*sd.sus,t+Math.min(atkT+sd.dec,relT*0.6));
-      g.gain.exponentialRampToValueAtTime(0.0001,t+relT);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.58*accent,t+atkT);
+    g.gain.setValueAtTime(0.58*accent*sd.sus,t+Math.min(atkT+sd.dec,relT*0.6));
+    g.gain.exponentialRampToValueAtTime(0.0001,t+relT);
       o1.connect(fil);o2.connect(sub);sub.connect(fil);fil.connect(driveN);driveN.connect(g);
       const fxn=routeLaneFx(g,'bass');
       trackNode(o1,cleanMs);cleanup(o1,[o2,sub,fil,driveN,g,...fxn],cleanMs);
@@ -783,9 +873,9 @@ export default function CesiraV1(){
     fil.Q.value=0.5+resonance*5+(p.mode==='grit'?0.5:0);
     // ADSR envelope scaled to note duration
     const atkT=Math.min(0.008,noteDur*0.05);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.linearRampToValueAtTime(0.72*accent,t+atkT);
-    g.gain.setValueAtTime(0.72*accent,t+relTime*0.3);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.58*accent,t+atkT);
+    g.gain.setValueAtTime(0.58*accent,t+relTime*0.3);
     g.gain.exponentialRampToValueAtTime(0.0001,t+relTime);
     const cleanMs=(relTime+0.3)*1000;
 
@@ -882,9 +972,9 @@ export default function CesiraV1(){
     vib.frequency.value=0.5+synthLfo*9;vg.gain.value=clamp(synthLfo*9+(['lead','star'].includes(p.mode)?1.2:0),0,22);
     ng.gain.value=['mist','air','choir'].includes(p.mode)?0.12+noise*0.1:0.018;
     // Proper ADSR
-    amp.gain.setValueAtTime(0.0001,t);
-    amp.gain.linearRampToValueAtTime(0.44*accent,t+atkT);
-    amp.gain.setValueAtTime(0.44*accent,t+holdEnd);
+    amp.gain.setValueAtTime(0,t);
+    amp.gain.linearRampToValueAtTime(0.36*accent,t+atkT);
+    amp.gain.setValueAtTime(0.36*accent,t+holdEnd);
     amp.gain.exponentialRampToValueAtTime(0.0001,t+relT);
 
     if(['glass','bell','star','candy'].includes(p.mode)){
