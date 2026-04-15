@@ -387,11 +387,13 @@ export default function CesiraV1(){
     node.curve=c;node.oversample='2x';
   };
 
+  const makeReverbIR=(ctx,duration=1.2,decay=2.5)=>{const sr=ctx.sampleRate,len=Math.floor(sr*duration);const buf=ctx.createBuffer(2,len,sr);for(let ch=0;ch<2;ch++){const d=buf.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);}return buf;};
+
   const initAudio=async()=>{
     if(audioRef.current){await audioRef.current.ctx.resume();setIsReady(true);return;}
     const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
     const ctx=new AudioCtx({sampleRate:44100,latencyHint:'interactive'});
-    const inputBus=ctx.createGain();inputBus.gain.value=0.88;
+    const inputBus=ctx.createGain();inputBus.gain.value=0.82;
     const preDrive=ctx.createWaveShaper();
     const toneFilter=ctx.createBiquadFilter();toneFilter.type='lowpass';toneFilter.frequency.value=16000;toneFilter.Q.value=0.5;
     const compressor=ctx.createDynamicsCompressor();compressor.threshold.value=-18;compressor.knee.value=12;compressor.ratio.value=4;compressor.attack.value=0.005;compressor.release.value=0.12;
@@ -402,11 +404,27 @@ export default function CesiraV1(){
     const output=ctx.createGain();
     const analyser=ctx.createAnalyser();analyser.fftSize=512;analyser.smoothingTimeConstant=0.8;
     const dest=ctx.createMediaStreamDestination();
-    inputBus.connect(preDrive);preDrive.connect(toneFilter);toneFilter.connect(compressor);compressor.connect(dry);compressor.connect(splitter);
+    // Chorus
+    const chorusWet=ctx.createGain();chorusWet.gain.value=0.0;
+    const cDel1=ctx.createDelay(0.05),cDel2=ctx.createDelay(0.05);
+    const cLfo1=ctx.createOscillator(),cLfo2=ctx.createOscillator();
+    const cLg1=ctx.createGain(),cLg2=ctx.createGain();
+    cLfo1.frequency.value=0.9;cLfo2.frequency.value=1.3;cLg1.gain.value=0.003;cLg2.gain.value=0.004;
+    cDel1.delayTime.value=0.025;cDel2.delayTime.value=0.031;
+    cLfo1.connect(cLg1);cLg1.connect(cDel1.delayTime);cLfo2.connect(cLg2);cLg2.connect(cDel2.delayTime);
+    cLfo1.start();cLfo2.start();
+    // Reverb
+    const reverb=ctx.createConvolver();reverb.buffer=makeReverbIR(ctx,1.4,2.2);
+    const reverbWet=ctx.createGain();reverbWet.gain.value=0.0;
+    inputBus.connect(preDrive);preDrive.connect(toneFilter);toneFilter.connect(compressor);
+    compressor.connect(dry);compressor.connect(splitter);
+    compressor.connect(cDel1);compressor.connect(cDel2);cDel1.connect(chorusWet);cDel2.connect(chorusWet);
+    compressor.connect(reverb);reverb.connect(reverbWet);
     splitter.connect(leftDelay,0);splitter.connect(rightDelay,1);rightDelay.connect(toneEcho);toneEcho.connect(feedback);feedback.connect(leftDelay);
-    leftDelay.connect(merger,0,0);rightDelay.connect(merger,0,1);merger.connect(wet);dry.connect(output);wet.connect(output);
+    leftDelay.connect(merger,0,0);rightDelay.connect(merger,0,1);merger.connect(wet);
+    dry.connect(output);wet.connect(output);chorusWet.connect(output);reverbWet.connect(output);
     output.connect(limiter);limiter.connect(analyser);limiter.connect(ctx.destination);limiter.connect(dest);
-    audioRef.current={ctx,inputBus,preDrive,toneFilter,compressor,limiter,dry,wet,leftDelay,rightDelay,feedback,output,analyser,dest};
+    audioRef.current={ctx,inputBus,preDrive,toneFilter,compressor,limiter,dry,wet,leftDelay,rightDelay,feedback,output,analyser,dest,chorusWet,reverbWet,cLfo1,cLfo2};
     setScopeAnalyser(analyser);
     setDriveCurve(preDrive,fxScenes[fxPreset].drive*0.5);
     setIsReady(true);setStatusText('Audio online.');applyFxScene(fxPreset,false,ctx.currentTime);
@@ -424,6 +442,10 @@ export default function CesiraV1(){
     audio.wet.gain.cancelScheduledValues(now);audio.dry.gain.cancelScheduledValues(now);
     audio.wet.gain.linearRampToValueAtTime(clamp(fx.width*0.3+space*0.16+macro*0.05,0.04,0.38),now+0.04);
     audio.dry.gain.linearRampToValueAtTime(clamp(0.9-fx.width*0.12-macro*0.04,0.62,0.94),now+0.04);
+    // Chorus — driven by space
+    if(audio.chorusWet)audio.chorusWet.gain.linearRampToValueAtTime(clamp(space*0.18+fx.width*0.1,0,0.28),now+0.08);
+    // Reverb — driven by space + fx
+    if(audio.reverbWet)audio.reverbWet.gain.linearRampToValueAtTime(clamp(space*0.22+fx.width*0.08,0,0.32),now+0.1);
     audio.output.gain.cancelScheduledValues(now);audio.output.gain.linearRampToValueAtTime(master,now+0.04);
   };
   useEffect(()=>{if(!audioRef.current)return;applyFxScene(fxPreset,false);},[fxPreset,tone,space,noise]);
@@ -504,7 +526,6 @@ export default function CesiraV1(){
     rampEnv(g.gain,t,0.003,p.mode==='drone'?0.58:0.24,0.72*accent);
 
     if(p.mode==='fm'||p.mode==='bit'){
-      // True FM synthesis
       const idx=fmIndexRef.current*(p.mode==='bit'?3:1.5);
       const{carrier,modulator,modGain}=makeFmPair(audio.ctx,f,p.mode==='fm'?2.0:3.0,idx,'sine');
       const sub=audio.ctx.createGain();sub.gain.value=bassSubAmount*0.4;
@@ -513,6 +534,22 @@ export default function CesiraV1(){
       const fxn=routeLaneFx(g,'bass');cleanup(carrier,[modulator,modGain,sub,subOsc,fil,g,...fxn],1100);
       safeStart(carrier,t);safeStart(modulator,t);safeStart(subOsc,t);safeStop(carrier,t+0.52);safeStop(modulator,t+0.52);safeStop(subOsc,t+0.52);
       sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,520);return;
+    }
+
+    if(p.mode==='fold'||p.mode==='wet'){
+      // Ring modulation: carrier × ring oscillator
+      const carrier=audio.ctx.createOscillator(),ringOsc=audio.ctx.createOscillator(),ringGain=audio.ctx.createGain();
+      carrier.type='sawtooth';carrier.frequency.value=f;
+      ringOsc.type='sine';ringOsc.frequency.value=f*(p.mode==='fold'?1.5:0.75);
+      ringGain.gain.value=0; // ring mod via gain modulation
+      const ringMod=audio.ctx.createGain();ringMod.gain.value=0.5;
+      ringOsc.connect(ringGain);ringGain.connect(ringMod.gain);carrier.connect(ringMod);ringMod.connect(fil);
+      const sub=audio.ctx.createGain();sub.gain.value=bassSubAmount*0.5;
+      const subOsc=audio.ctx.createOscillator();subOsc.type='sine';subOsc.frequency.value=f*0.5;
+      subOsc.connect(sub);sub.connect(fil);fil.connect(g);
+      const fxn=routeLaneFx(g,'bass');cleanup(carrier,[ringOsc,ringGain,ringMod,sub,subOsc,fil,g,...fxn],1100);
+      safeStart(carrier,t);safeStart(ringOsc,t);safeStart(subOsc,t);safeStop(carrier,t+0.5);safeStop(ringOsc,t+0.5);safeStop(subOsc,t+0.5);
+      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,500);return;
     }
 
     const o1=audio.ctx.createOscillator(),o2=audio.ctx.createOscillator(),sub=audio.ctx.createGain(),tg=audio.ctx.createGain(),lfo=audio.ctx.createOscillator(),lg=audio.ctx.createGain();
@@ -767,63 +804,69 @@ export default function CesiraV1(){
             </div>
           </div>
 
-          {/* Lane rows */}
-          <div style={{flex:1,display:'flex',flexDirection:'column',gap:'2px',minHeight:0}}>
+          {/* Lane control strip — one compact horizontal row per lane */}
+          <div style={{display:'flex',flexDirection:'column',gap:'2px',flexShrink:0,paddingBottom:'3px',borderBottom:`1px solid rgba(255,255,255,0.05)`}}>
             {laneLabels.map(({key,label,long})=>{
               const lc=LANE_COLOR[key];const isActive=activeLane===key;
               const vuLevel=laneVU[key]||0;const fa=Math.max(0,1-(Date.now()-(padFlash[key]||0))/160);
-              const laneH={kick:1.4,snare:1.1,hat:0.75,bass:1.2,synth:1.1}[key];
               return(
-                <div key={key} style={{flex:laneH,display:'flex',gap:'3px',alignItems:'stretch',minHeight:0}}>
-                  {/* Lane sidebar */}
-                  <div style={{width:'90px',flexShrink:0,display:'flex',gap:'3px',alignItems:'center'}}>
-                    <VU level={vuLevel} color={lc} width={4} height={26}/>
-                    <div style={{flex:1,display:'flex',flexDirection:'column',gap:'1.5px'}}>
-                      <div style={{display:'flex',gap:'2px',alignItems:'center'}}>
-                        <button onClick={()=>setActiveLane(key)} onMouseDown={e=>onPadDown(key,e)} onMouseUp={e=>onPadUp(key,e)}
-                          style={{flex:1,padding:'2px 0',borderRadius:'4px',border:`1px solid ${isActive?lc:BD}`,background:isActive?`${lc}1a`:fa>0.05?`${lc}${Math.round(fa*24).toString(16).padStart(2,'0')}`:B1,color:isActive?lc:'#475569',fontSize:'9px',fontWeight:900,cursor:'pointer',transition:'border-color 0.08s',boxShadow:fa>0.1?`0 0 ${Math.round(fa*8)}px ${lc}55`:'none'}}>
-                          {label}
-                        </button>
-                        <span style={{fontSize:'6.5px',color:'#2d3d4d',letterSpacing:'0.08em',fontWeight:600}}>{long[0]+long.slice(1).toLowerCase()}</span>
-                      </div>
-                      <div style={{display:'flex',gap:'1px'}}>
-                        {[16,32,48,64].map(s=>(
-                          <button key={s} onClick={()=>setLaneStepCount(key,s)}
-                            style={{flex:1,padding:'0',height:'10px',borderRadius:'2px',border:`1px solid ${laneStepCounts[key]===s?lc:BD}`,background:laneStepCounts[key]===s?`${lc}22`:B1,color:laneStepCounts[key]===s?lc:'#283848',fontSize:'5.5px',fontWeight:800,cursor:'pointer'}}>
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                      <div style={{display:'flex',alignItems:'center',gap:'2px'}}>
-                        <span style={{fontSize:'5px',color:'#283848',fontWeight:700}}>V</span>
-                        <input type="range" min={0} max={1} step={0.01} value={laneVolumes[key]} onChange={e=>setLaneVolumes(prev=>({...prev,[key]:Number(e.target.value)}))}
-                          style={{flex:1,height:'2px',accentColor:lc,cursor:'pointer'}}/>
-                        <span style={{fontSize:'5.5px',color:lc,fontWeight:800,width:'18px',textAlign:'right'}}>{Math.round(laneVolumes[key]*100)}</span>
-                      </div>
+                <div key={key} style={{display:'flex',alignItems:'center',gap:'5px',height:'18px'}}>
+                  {/* VU + trigger */}
+                  <div style={{display:'flex',alignItems:'center',gap:'3px',flexShrink:0}}>
+                    <div style={{display:'flex',flexDirection:'row',gap:'1px',alignItems:'center',height:'12px'}}>
+                      {Array.from({length:6},(_,i)=>{const lit=i<Math.round(vuLevel*6);return<div key={i} style={{width:'3px',height:'100%',borderRadius:'1px',background:lit?(i>4?'#f43f5e':i>3?'#fbbf24':lc):'rgba(255,255,255,0.05)',transition:'background 0.04s'}}/>;})  }
                     </div>
+                    <button onMouseDown={e=>onPadDown(key,e)} onMouseUp={e=>onPadUp(key,e)} onClick={()=>setActiveLane(key)}
+                      style={{padding:'2px 7px',borderRadius:'4px',border:`1px solid ${isActive?lc:BD}`,background:isActive?`${lc}18`:fa>0.05?`${lc}${Math.round(fa*20).toString(16).padStart(2,'0')}`:B1,color:isActive?lc:'#475569',fontSize:'8px',fontWeight:900,cursor:'pointer',letterSpacing:'0.06em',boxShadow:fa>0.1?`0 0 6px ${lc}50`:'none',transition:'border-color 0.08s',minWidth:'28px',textAlign:'center'}}>
+                      {label}
+                    </button>
+                    <span style={{fontSize:'6px',color:'#2a3a4a',fontWeight:700,letterSpacing:'0.1em',minWidth:'24px'}}>{long.toUpperCase()}</span>
                   </div>
+                  {/* Step count pills */}
+                  <div style={{display:'flex',gap:'1px',flexShrink:0}}>
+                    {[16,32,48,64].map(s=>(
+                      <button key={s} onClick={()=>setLaneStepCount(key,s)}
+                        style={{padding:'1px 4px',borderRadius:'3px',border:`1px solid ${laneStepCounts[key]===s?lc:BD}`,background:laneStepCounts[key]===s?`${lc}20`:B1,color:laneStepCounts[key]===s?lc:'#2a3a4a',fontSize:'6px',fontWeight:800,cursor:'pointer',lineHeight:1.4}}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Volume: compact horizontal slider + value */}
+                  <div style={{display:'flex',alignItems:'center',gap:'3px',flex:1,minWidth:0}}>
+                    <span style={{fontSize:'5.5px',color:'#2a3a4a',fontWeight:700,flexShrink:0}}>VOL</span>
+                    <input type="range" min={0} max={1} step={0.01} value={laneVolumes[key]} onChange={e=>setLaneVolumes(prev=>({...prev,[key]:Number(e.target.value)}))}
+                      style={{flex:1,height:'2px',accentColor:lc,cursor:'pointer',minWidth:0}}/>
+                    <span style={{fontSize:'6px',color:lc,fontWeight:800,flexShrink:0,minWidth:'20px',textAlign:'right'}}>{Math.round(laneVolumes[key]*100)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-                  {/* Step grid */}
-                  <div style={{flex:1,display:'grid',gridTemplateColumns:`repeat(${visibleIndices.length},1fr)`,gap:'1.5px',alignItems:'stretch'}}>
-                    {visibleIndices.map(idx=>{
-                      const sd=patterns[key][idx];const on=sd.on,isActiveStep=step===idx&&isPlaying,disabled=idx>=laneStepCounts[key];
-                      const isBeat=idx%16===0,isBar=idx%4===0;
-                      const isSel=selStep?.lane===key&&selStep?.idx===idx;
-                      const probAlpha=on?Math.round(clamp((sd.prob??1)*255,60,255)).toString(16).padStart(2,'0'):'';
-                      return(
-                        <button key={`${key}-${idx}`}
-                          onClick={()=>{if(disabled)return;if(isSel){setSelectedStep(null);}else{toggleCell(key,idx);setSelectedStep(on?null:{lane:key,idx});setActiveLane(key);}}}
-                          style={{
-                            width:'100%',borderRadius:'3px',position:'relative',
-                            border:`1px solid ${isActiveStep?lc:isSel?lc:isBeat?'rgba(255,255,255,0.14)':isBar?'rgba(255,255,255,0.07)':'rgba(255,255,255,0.035)'}`,
-                            background:isActiveStep?`${lc}75`:on?`${lc}${probAlpha}`:disabled?'rgba(255,255,255,0.005)':'rgba(255,255,255,0.025)',
-                            opacity:disabled?0.1:1,cursor:disabled?'not-allowed':'pointer',
-                            boxShadow:isActiveStep?`0 0 10px ${lc}90`:on?`0 0 3px ${lc}28`:'none',
-                            transition:'background 0.04s',
-                          }}/>
-                      );
-                    })}
-                  </div>
+          {/* Step grids — all uniform height */}
+          <div style={{flex:1,display:'flex',flexDirection:'column',gap:'2px',minHeight:0}}>
+            {laneLabels.map(({key})=>{
+              const lc=LANE_COLOR[key];
+              return(
+                <div key={key} style={{flex:1,display:'grid',gridTemplateColumns:`repeat(${visibleIndices.length},1fr)`,gap:'1.5px',alignItems:'stretch',minHeight:0}}>
+                  {visibleIndices.map(idx=>{
+                    const sd=patterns[key][idx];const on=sd.on,isActiveStep=step===idx&&isPlaying,disabled=idx>=laneStepCounts[key];
+                    const isBeat=idx%16===0,isBar=idx%4===0;
+                    const isSel=selStep?.lane===key&&selStep?.idx===idx;
+                    const probAlpha=on?Math.round(clamp((sd.prob??1)*255,55,255)).toString(16).padStart(2,'0'):'';
+                    return(
+                      <button key={`${key}-${idx}`}
+                        onClick={()=>{if(disabled)return;if(isSel){setSelectedStep(null);}else{toggleCell(key,idx);setSelectedStep(on?null:{lane:key,idx});setActiveLane(key);}}}
+                        style={{
+                          width:'100%',borderRadius:'3px',
+                          border:`1px solid ${isActiveStep?lc:isSel?lc:isBeat?'rgba(255,255,255,0.14)':isBar?'rgba(255,255,255,0.07)':'rgba(255,255,255,0.03)'}`,
+                          background:isActiveStep?`${lc}78`:on?`${lc}${probAlpha}`:disabled?'rgba(255,255,255,0.004)':'rgba(255,255,255,0.022)',
+                          opacity:disabled?0.08:1,cursor:disabled?'not-allowed':'pointer',
+                          boxShadow:isActiveStep?`0 0 9px ${lc}88`:on?`0 0 2px ${lc}26`:'none',
+                          transition:'background 0.04s',
+                        }}/>
+                    );
+                  })}
                 </div>
               );
             })}
