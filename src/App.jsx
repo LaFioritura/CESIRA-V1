@@ -6,10 +6,12 @@ const DEFAULT_STEPS = 16;
 const DEFAULT_BPM = 112;
 const LANE_KEYS = ['kick','snare','hat','bass','synth'];
 const PAGE_SIZE = 16;
-const SCHEDULE_AHEAD = 0.12; // seconds to schedule ahead
-const LOOKAHEAD_MS = 25;     // scheduler interval ms
+const SCHEDULE_AHEAD = 0.14;
+const LOOKAHEAD_MS = 20;
+const UNDO_LIMIT = 24;
 
 const LANE_COLOR = {kick:'#f87171',snare:'#fbbf24',hat:'#fde047',bass:'#22d3ee',synth:'#a78bfa'};
+const LANE_CH    = {kick:1,snare:2,hat:3,bass:4,synth:5}; // MIDI channels
 
 const drumPresets = [
   {name:'Kick Melt',type:'kick'},{name:'Kick Rubber',type:'kick2'},
@@ -68,6 +70,13 @@ const noteToFreq={
   C4:261.63,Db4:277.18,D4:293.66,Eb4:311.13,E4:329.63,F4:349.23,G4:392.0,Ab4:415.3,A4:440.0,Bb4:466.16,
   C5:523.25,Db5:554.37,D5:587.33,Eb5:622.25,F5:698.46,G5:783.99,A5:880.0,
 };
+// note name → MIDI note number for MIDI out
+const noteToMidi={
+  C2:36,Db2:37,D2:38,Eb2:39,E2:40,F2:41,G2:43,Ab2:44,A2:45,Bb2:46,
+  C3:48,Db3:49,D3:50,Eb3:51,E3:52,F3:53,G3:55,A3:57,
+  C4:60,Db4:61,D4:62,Eb4:63,E4:64,F4:65,G4:67,Ab4:68,A4:69,Bb4:70,
+  C5:72,Db5:73,D5:74,Eb5:75,F5:77,G5:79,A5:81,
+};
 const MODES={
   minor:   {bass:['C2','D2','Eb2','G2','A2','C3','D3','Eb3'],synth:['C4','D4','Eb4','G4','A4','C5','D5','Eb5']},
   phrygian:{bass:['C2','Db2','Eb2','G2','Ab2','C3','Db3','Eb3'],synth:['C4','Db4','Eb4','G4','Ab4','C5','Db5','Eb5']},
@@ -80,25 +89,29 @@ const GROOVE_MAP={
   bunker:{kickBias:0.34,snareBias:0.1,hatBias:0.34,bassBias:0.24,synthBias:0.14},
   float: {kickBias:0.16,snareBias:0.12,hatBias:0.5,bassBias:0.18,synthBias:0.28},
 };
+// Default per-step data
+const makeStepData=()=>Array.from({length:MAX_STEPS},()=>({on:false,prob:1.0,len:1,vel:1.0}));
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
+// ─── Pure helpers ──────────────────────────────────────────────────────────────
 const clamp=(v,mn,mx)=>Math.min(mx,Math.max(mn,v));
 const seededChoice=arr=>arr[Math.floor(Math.random()*arr.length)];
 const rotateArray=(arr,steps)=>arr.map((_,i)=>arr[(i-steps+arr.length)%arr.length]);
-const makeEmptyLane=()=>Array.from({length:MAX_STEPS},()=>false);
 const makeEmptyNotes=(d='C2')=>Array.from({length:MAX_STEPS},()=>d);
 
 function makePatternTemplate(sc=DEFAULT_STEPS){
-  const p={kick:makeEmptyLane(),snare:makeEmptyLane(),hat:makeEmptyLane(),bass:makeEmptyLane(),synth:makeEmptyLane()};
-  [0,8,12,24,32,40,56].forEach(i=>{if(i<sc)p.kick[i]=true;});
-  [4,12,20,28,36,44,52,60].forEach(i=>{if(i<sc)p.snare[i]=true;});
-  for(let i=0;i<sc;i+=2)p.hat[i]=true;
-  [0,3,7,10,13,18,22,29,33,39,46,53].forEach(i=>{if(i<sc)p.bass[i]=true;});
-  [2,6,11,14,19,27,35,43,50,58].forEach(i=>{if(i<sc)p.synth[i]=true;});
+  const mk=()=>makeStepData();
+  const p={kick:mk(),snare:mk(),hat:mk(),bass:mk(),synth:mk()};
+  [0,8,12,24,32,40,56].forEach(i=>{if(i<sc)p.kick[i].on=true;});
+  [4,12,20,28,36,44,52,60].forEach(i=>{if(i<sc)p.snare[i].on=true;});
+  for(let i=0;i<sc;i+=2)p.hat[i].on=true;
+  [0,3,7,10,13,18,22,29,33,39,46,53].forEach(i=>{if(i<sc)p.bass[i].on=true;});
+  [2,6,11,14,19,27,35,43,50,58].forEach(i=>{if(i<sc)p.synth[i].on=true;});
   return p;
 }
+
 function chooseMode(chaos){if(chaos>0.78)return'chroma';if(chaos>0.56)return seededChoice(['minor','phrygian']);return seededChoice(['minor','dorian','phrygian']);}
 function chooseGroove(density,chaos){if(density>0.68&&chaos>0.45)return'bunker';if(chaos>0.62)return'broken';if(density<0.38)return'float';return'steady';}
+
 function buildNoteLanes(stepCount,modeName,grooveName,chaos){
   const mode=MODES[modeName]||MODES.minor,groove=GROOVE_MAP[grooveName]||GROOVE_MAP.steady;
   const bassLine=makeEmptyNotes(mode.bass[0]),synthLine=makeEmptyNotes(mode.synth[0]);
@@ -111,6 +124,7 @@ function buildNoteLanes(stepCount,modeName,grooveName,chaos){
   if(chaos>0.66)return{bassLine:rotateArray(bassLine,Math.floor(Math.random()*3)),synthLine:rotateArray(synthLine,Math.floor(Math.random()*5))};
   return{bassLine,synthLine};
 }
+
 function chooseLaneLengths(density,chaos,grooveName){
   const banks={
     steady:[{kick:16,snare:16,hat:16,bass:32,synth:32,section:'pulse-cell'},{kick:32,snare:16,hat:32,bass:32,synth:48,section:'night-drive'},{kick:16,snare:32,hat:16,bass:48,synth:64,section:'slow-rise'}],
@@ -122,6 +136,7 @@ function chooseLaneLengths(density,chaos,grooveName){
   const snap=v=>allowed.reduce((b,c)=>Math.abs(c-v)<Math.abs(b-v)?c:b,allowed[0]),nudge=chaos>0.72?8:density>0.64?0:-4;
   return{kick:snap(clamp(sel.kick+nudge,16,MAX_STEPS)),snare:snap(clamp(sel.snare+nudge,16,MAX_STEPS)),hat:snap(clamp(sel.hat+nudge,16,MAX_STEPS)),bass:snap(clamp(sel.bass+nudge,16,MAX_STEPS)),synth:snap(clamp(sel.synth+nudge,16,MAX_STEPS)),section:sel.section};
 }
+
 function getGrooveAccent(profile,lane,stepIndex,amount){
   const pos=stepIndex%16;
   const maps={
@@ -132,32 +147,35 @@ function getGrooveAccent(profile,lane,stepIndex,amount){
   };
   const table=(maps[profile]||maps.steady)[lane]||maps.steady.kick;return 1+(table[pos]||1-1)*clamp(amount,0,1);
 }
+
 function buildFreestylePattern(stepCount,laneStepCounts,density,chaos,currentPresets,options={}){
   const grooveName=chooseGroove(density,chaos),modeName=chooseMode(chaos),autoLength=options.autoLength??true;
   const gl=autoLength?chooseLaneLengths(density,chaos,grooveName):{...laneStepCounts,section:'manual-grid'};
   const ell={kick:gl.kick||laneStepCounts.kick||stepCount,snare:gl.snare||laneStepCounts.snare||stepCount,hat:gl.hat||laneStepCounts.hat||stepCount,bass:gl.bass||laneStepCounts.bass||stepCount,synth:gl.synth||laneStepCounts.synth||stepCount};
   const masterLength=Math.max(...Object.values(ell));
-  const p={kick:makeEmptyLane(),snare:makeEmptyLane(),hat:makeEmptyLane(),bass:makeEmptyLane(),synth:makeEmptyLane()};
+  const p={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};
   const groove=GROOVE_MAP[grooveName];const{bassLine,synthLine}=buildNoteLanes(masterLength,modeName,grooveName,chaos);
   const bar=16,phraseShape=seededChoice(['anchor','stagger','mirror','fall']);
   for(const lane of LANE_KEYS){const ll=ell[lane]||masterLength;for(let i=0;i<ll;i++){
     const pos=i%bar,strong=pos===0||pos===8,backbeat=pos===4||pos===12,offbeat=pos%2===1,pb=Math.floor(i/8)%4;
     const pw=phraseShape==='anchor'?[1,0.75,0.92,0.68][pb]:phraseShape==='stagger'?[0.72,1,0.66,0.94][pb]:phraseShape==='mirror'?[1,0.78,0.78,1][pb]:[1,0.9,0.68,0.56][pb];
-    if(lane==='kick'){if(strong||Math.random()<(groove.kickBias+density*0.18+(strong?0.2:0))*pw)p.kick[i]=true;}
-    else if(lane==='snare'){if(backbeat||Math.random()<(groove.snareBias+density*0.08+(backbeat?0.26:0))*(1.06-pw*0.18))p.snare[i]=true;}
-    else if(lane==='hat'){if(Math.random()<(!offbeat?groove.hatBias-0.08+density*0.2:groove.hatBias+density*0.16)*(0.82+pw*0.22))p.hat[i]=true;}
-    else if(lane==='bass'){if(Math.random()<(pos===0||pos===3||pos===7?0.94:groove.bassBias+density*0.14)*(0.8+pw*0.26))p.bass[i]=true;}
-    else if(lane==='synth'){if((Math.random()<(pos===2||pos===6||pos===10?0.72:groove.synthBias+density*0.1)*(0.7+pw*0.34)&&!strong)||(pb===3&&Math.random()<0.18+chaos*0.16))p.synth[i]=true;}
+    let hit=false;
+    if(lane==='kick'){if(strong||Math.random()<(groove.kickBias+density*0.18+(strong?0.2:0))*pw)hit=true;}
+    else if(lane==='snare'){if(backbeat||Math.random()<(groove.snareBias+density*0.08+(backbeat?0.26:0))*(1.06-pw*0.18))hit=true;}
+    else if(lane==='hat'){if(Math.random()<(!offbeat?groove.hatBias-0.08+density*0.2:groove.hatBias+density*0.16)*(0.82+pw*0.22))hit=true;}
+    else if(lane==='bass'){if(Math.random()<(pos===0||pos===3||pos===7?0.94:groove.bassBias+density*0.14)*(0.8+pw*0.26))hit=true;}
+    else if(lane==='synth'){if((Math.random()<(pos===2||pos===6||pos===10?0.72:groove.synthBias+density*0.1)*(0.7+pw*0.34)&&!strong)||(pb===3&&Math.random()<0.18+chaos*0.16))hit=true;}
+    if(hit){p[lane][i].on=true;p[lane][i].prob=clamp(0.6+Math.random()*0.4,0.5,1);p[lane][i].vel=clamp(0.5+pw*0.5+Math.random()*0.2,0.4,1);}
   }}
-  for(let i=0;i<ell.kick;i+=16)p.kick[i]=true;
-  for(let i=0;i<ell.snare;i+=16){if(i+4<ell.snare)p.snare[i+4]=true;if(i+12<ell.snare)p.snare[i+12]=true;}
+  for(let i=0;i<ell.kick;i+=16)p.kick[i].on=true;
+  for(let i=0;i<ell.snare;i+=16){if(i+4<ell.snare)p.snare[i+4].on=true;if(i+12<ell.snare)p.snare[i+12].on=true;}
   const mp=Math.max(2,Math.floor(chaos*10));
   for(let m=0;m<mp;m++){const lane=seededChoice(LANE_KEYS),ll=ell[lane]||masterLength,pos=Math.floor(Math.random()*ll);
-    if(lane==='hat'){p.hat[pos]=!p.hat[pos];if(chaos>0.52&&pos+2<ll&&Math.random()<0.34)p.hat[pos+2]=true;}
-    else if(lane==='kick'){if(pos%4!==0)p.kick[pos]=Math.random()<0.42+chaos*0.22;}
-    else if(lane==='bass'){p.bass[pos]=!p.bass[pos];if(Math.random()<0.34)bassLine[pos]=seededChoice(MODES[modeName].bass);}
-    else if(lane==='synth'){p.synth[pos]=!p.synth[pos];if(Math.random()<0.4)synthLine[pos]=seededChoice(MODES[modeName].synth);}
-    else{p.snare[pos]=!p.snare[pos]&&pos%4!==0;}
+    if(lane==='hat'){p.hat[pos].on=!p.hat[pos].on;if(chaos>0.52&&pos+2<ll&&Math.random()<0.34)p.hat[pos+2].on=true;}
+    else if(lane==='kick'){if(pos%4!==0)p.kick[pos].on=Math.random()<0.42+chaos*0.22;}
+    else if(lane==='bass'){p.bass[pos].on=!p.bass[pos].on;if(Math.random()<0.34)bassLine[pos]=seededChoice(MODES[modeName].bass);}
+    else if(lane==='synth'){p.synth[pos].on=!p.synth[pos].on;if(Math.random()<0.4)synthLine[pos]=seededChoice(MODES[modeName].synth);}
+    else{p.snare[pos].on=!p.snare[pos].on&&pos%4!==0;}
   }
   for(let i=ell.bass;i<MAX_STEPS;i++)bassLine[i]=bassLine[Math.max(0,i%Math.max(1,ell.bass))];
   for(let i=ell.synth;i<MAX_STEPS;i++)synthLine[i]=synthLine[Math.max(0,i%Math.max(1,ell.synth))];
@@ -169,70 +187,87 @@ function buildFreestylePattern(stepCount,laneStepCounts,density,chaos,currentPre
   };
 }
 
-// ─── UI Components ────────────────────────────────────────────────────────────
+// ─── UI Components ─────────────────────────────────────────────────────────────
 const B0='#080d18',B1='rgba(255,255,255,0.025)',BD='rgba(255,255,255,0.07)';
 
-// Circular SVG knob
-function Knob({label,value,setValue,min=0,max=1,step=0.01,fmt,size=38,color='#34d399'}){
+function Knob({label,value,setValue,min=0,max=1,step=0.01,fmt,size=36,color='#34d399'}){
   const pct=(value-min)/(max-min);
-  const startAngle=-225,endAngle=45,range=endAngle-startAngle;
-  const angle=startAngle+range*pct;
+  const startAngle=-225,totalArc=270;
+  const angle=startAngle+totalArc*pct;
   const r=size/2-4,cx=size/2,cy=size/2;
   const toXY=(deg,radius)=>{const rad=(deg-90)*Math.PI/180;return{x:cx+radius*Math.cos(rad),y:cy+radius*Math.sin(rad)};};
-  const trackStart=toXY(startAngle,r),trackEnd=toXY(endAngle,r);
-  const fillEnd=toXY(angle,r);
-  const largeArcTrack=range>180?1:0;
-  const largeArcFill=range*pct>180?1:0;
+  const ts=toXY(startAngle,r),te=toXY(startAngle+totalArc,r),fe=toXY(angle,r);
+  const lgt=totalArc>180?1:0,lgf=totalArc*pct>180?1:0;
   const dragging=useRef(false),startY=useRef(0),startVal=useRef(value);
-  const onMouseDown=e=>{dragging.current=true;startY.current=e.clientY;startVal.current=value;e.preventDefault();};
   useEffect(()=>{
-    const onMove=e=>{if(!dragging.current)return;const delta=(startY.current-e.clientY)/(200);setValue(clamp(startVal.current+delta*(max-min),min,max));};
+    const onMove=e=>{if(!dragging.current)return;const delta=(startY.current-e.clientY)/180;setValue(clamp(startVal.current+delta*(max-min),min,max));};
     const onUp=()=>{dragging.current=false;};
-    window.addEventListener('mousemove',onMove);window.addEventListener('mouseup',onUp);
+    window.addEventListener('mousemove',onMove,{passive:true});window.addEventListener('mouseup',onUp);
     return()=>{window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);};
   },[min,max,setValue]);
   return(
-    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'1px',cursor:'ns-resize'}} onMouseDown={onMouseDown}>
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'1px',cursor:'ns-resize'}}
+      onMouseDown={e=>{dragging.current=true;startY.current=e.clientY;startVal.current=value;e.preventDefault();}}>
       <svg width={size} height={size} style={{overflow:'visible'}}>
-        <path d={`M${trackStart.x},${trackStart.y} A${r},${r} 0 ${largeArcTrack},1 ${trackEnd.x},${trackEnd.y}`} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" strokeLinecap="round"/>
-        {pct>0.01&&<path d={`M${toXY(startAngle,r).x},${toXY(startAngle,r).y} A${r},${r} 0 ${largeArcFill},1 ${fillEnd.x},${fillEnd.y}`} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"/>}
-        <circle cx={fillEnd.x} cy={fillEnd.y} r="3.5" fill={color}/>
-        <text x={cx} y={cy+4} textAnchor="middle" fontSize="8" fontWeight="800" fill={color} fontFamily="Inter,sans-serif">{fmt?fmt(value):value.toFixed(2)}</text>
+        <path d={`M${ts.x},${ts.y} A${r},${r} 0 ${lgt},1 ${te.x},${te.y}`} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="2.5" strokeLinecap="round"/>
+        {pct>0.01&&<path d={`M${ts.x},${ts.y} A${r},${r} 0 ${lgf},1 ${fe.x},${fe.y}`} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" style={{filter:`drop-shadow(0 0 3px ${color}66)`}}/>}
+        <circle cx={cx} cy={cy} r={r-3} fill="rgba(0,0,0,0.4)" stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
+        <circle cx={fe.x} cy={fe.y} r="3" fill={color} style={{filter:`drop-shadow(0 0 4px ${color})`}}/>
+        <text x={cx} y={cy+3.5} textAnchor="middle" fontSize="7.5" fontWeight="800" fill={color} fontFamily="Inter,sans-serif">{fmt?fmt(value):value.toFixed(2)}</text>
       </svg>
-      <div style={{fontSize:'7px',fontWeight:800,letterSpacing:'0.14em',color:'#475569',textTransform:'uppercase',textAlign:'center',lineHeight:1.2}}>{label}</div>
+      <div style={{fontSize:'7px',fontWeight:800,letterSpacing:'0.12em',color:'#475569',textTransform:'uppercase',textAlign:'center'}}>{label}</div>
     </div>
   );
 }
 
-// Compact slider for right panel
-function Slider({label,value,setValue,min=0,max=1,step=0.01,fmt}){
+function Slider({label,value,setValue,min=0,max=1,step=0.01,fmt,color='#34d399'}){
   return(
     <div style={{display:'flex',flexDirection:'column',gap:'1px'}}>
       <div style={{display:'flex',justifyContent:'space-between'}}>
-        <span style={{fontSize:'8px',fontWeight:800,letterSpacing:'0.14em',color:'#475569',textTransform:'uppercase'}}>{label}</span>
-        <span style={{fontSize:'9px',fontWeight:800,color:'#34d399'}}>{fmt?fmt(value):value.toFixed(2)}</span>
+        <span style={{fontSize:'7.5px',fontWeight:800,letterSpacing:'0.12em',color:'#475569',textTransform:'uppercase'}}>{label}</span>
+        <span style={{fontSize:'8px',fontWeight:800,color}}>{fmt?fmt(value):value.toFixed(2)}</span>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={e=>setValue(Number(e.target.value))} style={{width:'100%',accentColor:'#34d399',height:'2px',cursor:'pointer'}}/>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e=>setValue(Number(e.target.value))} style={{width:'100%',accentColor:color,height:'2px',cursor:'pointer'}}/>
     </div>
   );
 }
 
-// VU meter bar
-function VU({level,color='#34d399',width=6,height=28}){
-  const pct=clamp(level,0,1);
-  const segments=Math.floor(pct*8);
+function VU({level,color='#34d399',width=5,height=26}){
+  const segs=8,lit=Math.round(clamp(level,0,1)*segs);
   return(
-    <div style={{display:'flex',flexDirection:'column-reverse',gap:'1px',width,height}}>
-      {Array.from({length:8},(_,i)=>(
-        <div key={i} style={{flex:1,borderRadius:'1px',background:i<segments?(i>5?'#f43f5e':i>3?'#fbbf24':color):'rgba(255,255,255,0.06)',transition:'background 0.04s'}}/>
+    <div style={{display:'flex',flexDirection:'column-reverse',gap:'1px',width,height,flexShrink:0}}>
+      {Array.from({length:segs},(_,i)=>(
+        <div key={i} style={{flex:1,borderRadius:'1px',background:i<lit?(i>5?'#f43f5e':i>3?'#fbbf24':color):'rgba(255,255,255,0.05)',transition:'background 0.03s'}}/>
       ))}
     </div>
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
+// Oscilloscope
+function Scope({analyser,color='#34d399',width=230,height=28}){
+  const canvasRef=useRef(null);
+  useEffect(()=>{
+    if(!analyser)return;
+    let raf;
+    const draw=()=>{
+      const canvas=canvasRef.current;if(!canvas)return;
+      const ctx=canvas.getContext('2d');const W=canvas.width,H=canvas.height;
+      const buf=new Float32Array(analyser.fftSize);analyser.getFloatTimeDomainData(buf);
+      ctx.clearRect(0,0,W,H);
+      ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.globalAlpha=0.85;
+      ctx.shadowBlur=4;ctx.shadowColor=color;
+      ctx.beginPath();
+      for(let i=0;i<buf.length;i++){const x=(i/buf.length)*W,y=H/2+(buf[i]*H*0.8);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+      ctx.stroke();ctx.shadowBlur=0;
+      raf=requestAnimationFrame(draw);
+    };
+    draw();return()=>cancelAnimationFrame(raf);
+  },[analyser,color]);
+  return<canvas ref={canvasRef} width={width} height={height} style={{display:'block',borderRadius:'4px',background:'rgba(0,0,0,0.3)'}}/>;
+}
+
+// ─── Main App ──────────────────────────────────────────────────────────────────
 export default function CesiraV1(){
-  // — State —
   const [isReady,setIsReady]=useState(false);
   const [isPlaying,setIsPlaying]=useState(false);
   const [stutterOn,setStutterOn]=useState(false);
@@ -259,98 +294,120 @@ export default function CesiraV1(){
   const [projectName,setProjectName]=useState('CESIRA Session');const [metronomeOn,setMetronomeOn]=useState(false);const [metronomeLevel,setMetronomeLevel]=useState(0.42);
   const [projectSlots,setProjectSlots]=useState([null,null,null,null]);const [currentProjectSlot,setCurrentProjectSlot]=useState(null);
   const [rightTab,setRightTab]=useState('knobs');
-  // new
   const [laneVU,setLaneVU]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
+  const [midiEnabled,setMidiEnabled]=useState(false);
+  const [selectedStep,setSelectedStep]=useState(null); // {lane,idx}
+  const [fmIndex,setFmIndex]=useState(0.62); // FM modulation index
+  const [scopeAnalyser,setScopeAnalyser]=useState(null);
 
-  // — Refs —
-  const audioRef=useRef(null);
-  // Lookahead scheduler refs
-  const schedulerRef=useRef(null);
-  const nextNoteTimeRef=useRef(0);
-  const currentStepRef=useRef(0);
-  const isPlayingRef=useRef(false);
+  // Undo/Redo
+  const undoStack=useRef([]);const redoStack=useRef([]);
+  const pushUndo=(pat)=>{undoStack.current=[JSON.parse(JSON.stringify(pat)),...undoStack.current.slice(0,UNDO_LIMIT-1)];redoStack.current=[];};
+  const undo=()=>{if(!undoStack.current.length)return;redoStack.current=[JSON.parse(JSON.stringify(patterns)),...redoStack.current.slice(0,UNDO_LIMIT-1)];setPatterns(undoStack.current[0]);undoStack.current=undoStack.current.slice(1);setStatusText('Undo.');};
+  const redo=()=>{if(!redoStack.current.length)return;undoStack.current=[JSON.parse(JSON.stringify(patterns)),...undoStack.current.slice(0,UNDO_LIMIT-1)];setPatterns(redoStack.current[0]);redoStack.current=redoStack.current.slice(1);setStatusText('Redo.');};
+
+  // Refs
+  const audioRef=useRef(null);const schedulerRef=useRef(null);const nextNoteTimeRef=useRef(0);const currentStepRef=useRef(0);const isPlayingRef=useRef(false);
   const recorderRef=useRef(null),chunksRef=useRef([]),recordingsRef=useRef([]);
   const bpmRef=useRef(bpm),swingRef=useRef(swing),stepCountRef=useRef(stepCount),laneStepCountsRef=useRef(laneStepCounts);
   const patternsRef=useRef(patterns),bassLineRef=useRef(bassLine),synthLineRef=useRef(synthLine),laneFxRef=useRef(laneFx);
   const macroKnobRef=useRef(macroKnob),grooveAmountRef=useRef(grooveAmount),grooveProfileRef=useRef(grooveProfile),harmonicProfileRef=useRef(harmonicProfile);
-  const humanizeRef=useRef(humanize),stutterOnRef=useRef(stutterOn),stutterBurstRef=useRef(stutterBurst);
-  const laneVolumesRef=useRef(laneVolumes);
+  const humanizeRef=useRef(humanize),stutterOnRef=useRef(stutterOn),stutterBurstRef=useRef(stutterBurst),laneVolumesRef=useRef(laneVolumes);
   const drumPresetRef=useRef(drumPreset),bassPresetRef=useRef(bassPreset),synthPresetRef=useRef(synthPreset);
-  const bassWaveRef=useRef(bassWave),synthWaveRef=useRef(synthWave);
-  const importInputRef=useRef(null);
-  const vuDecayRef=useRef({});
+  const bassWaveRef=useRef(bassWave),synthWaveRef=useRef(synthWave),fmIndexRef=useRef(fmIndex);
+  const midiRef=useRef(null);const importInputRef=useRef(null);const laneGainNodes=useRef({});
+  const vuTimers=useRef({});
 
   const laneLabels=useMemo(()=>[{key:'kick',label:'K',long:'Kick'},{key:'snare',label:'S',long:'Snare'},{key:'hat',label:'H',long:'Hat'},{key:'bass',label:'B',long:'Bass'},{key:'synth',label:'Y',long:'Synth'}],[]);
   const totalPages=Math.ceil(stepCount/PAGE_SIZE),visibleStart=page*PAGE_SIZE,visibleEnd=Math.min(stepCount,visibleStart+PAGE_SIZE);
   const visibleIndices=Array.from({length:visibleEnd-visibleStart},(_,i)=>visibleStart+i);
 
   // Sync refs
-  useEffect(()=>{bpmRef.current=bpm;},[bpm]);
-  useEffect(()=>{swingRef.current=swing;},[swing]);
-  useEffect(()=>{stepCountRef.current=stepCount;},[stepCount]);
-  useEffect(()=>{laneStepCountsRef.current=laneStepCounts;},[laneStepCounts]);
-  useEffect(()=>{patternsRef.current=patterns;},[patterns]);
-  useEffect(()=>{const m=Math.max(...Object.values(laneStepCounts));setStepCount(m);stepCountRef.current=m;setPage(prev=>clamp(prev,0,Math.ceil(m/PAGE_SIZE)-1));if(currentStepRef.current>=m){currentStepRef.current=0;}},[laneStepCounts]);
-  useEffect(()=>{bassLineRef.current=bassLine;},[bassLine]);
-  useEffect(()=>{synthLineRef.current=synthLine;},[synthLine]);
-  useEffect(()=>{laneFxRef.current=laneFx;},[laneFx]);
-  useEffect(()=>{macroKnobRef.current=macroKnob;},[macroKnob]);
-  useEffect(()=>{grooveAmountRef.current=grooveAmount;},[grooveAmount]);
-  useEffect(()=>{grooveProfileRef.current=grooveProfile;},[grooveProfile]);
-  useEffect(()=>{harmonicProfileRef.current=harmonicProfile;},[harmonicProfile]);
-  useEffect(()=>{humanizeRef.current=humanize;},[humanize]);
-  useEffect(()=>{stutterOnRef.current=stutterOn;},[stutterOn]);
-  useEffect(()=>{stutterBurstRef.current=stutterBurst;},[stutterBurst]);
-  useEffect(()=>{laneVolumesRef.current=laneVolumes;},[laneVolumes]);
-  useEffect(()=>{drumPresetRef.current=drumPreset;},[drumPreset]);
-  useEffect(()=>{bassPresetRef.current=bassPreset;},[bassPreset]);
-  useEffect(()=>{synthPresetRef.current=synthPreset;},[synthPreset]);
-  useEffect(()=>{bassWaveRef.current=bassWave;},[bassWave]);
-  useEffect(()=>{synthWaveRef.current=synthWave;},[synthWave]);
+  useEffect(()=>{bpmRef.current=bpm;},[bpm]);useEffect(()=>{swingRef.current=swing;},[swing]);useEffect(()=>{stepCountRef.current=stepCount;},[stepCount]);
+  useEffect(()=>{laneStepCountsRef.current=laneStepCounts;},[laneStepCounts]);useEffect(()=>{patternsRef.current=patterns;},[patterns]);
+  useEffect(()=>{const m=Math.max(...Object.values(laneStepCounts));setStepCount(m);stepCountRef.current=m;setPage(prev=>clamp(prev,0,Math.ceil(m/PAGE_SIZE)-1));if(currentStepRef.current>=m)currentStepRef.current=0;},[laneStepCounts]);
+  useEffect(()=>{bassLineRef.current=bassLine;},[bassLine]);useEffect(()=>{synthLineRef.current=synthLine;},[synthLine]);useEffect(()=>{laneFxRef.current=laneFx;},[laneFx]);
+  useEffect(()=>{macroKnobRef.current=macroKnob;},[macroKnob]);useEffect(()=>{grooveAmountRef.current=grooveAmount;},[grooveAmount]);useEffect(()=>{grooveProfileRef.current=grooveProfile;},[grooveProfile]);
+  useEffect(()=>{harmonicProfileRef.current=harmonicProfile;},[harmonicProfile]);useEffect(()=>{humanizeRef.current=humanize;},[humanize]);useEffect(()=>{stutterOnRef.current=stutterOn;},[stutterOn]);
+  useEffect(()=>{stutterBurstRef.current=stutterBurst;},[stutterBurst]);useEffect(()=>{laneVolumesRef.current=laneVolumes;},[laneVolumes]);
+  useEffect(()=>{drumPresetRef.current=drumPreset;},[drumPreset]);useEffect(()=>{bassPresetRef.current=bassPreset;},[bassPreset]);useEffect(()=>{synthPresetRef.current=synthPreset;},[synthPreset]);
+  useEffect(()=>{bassWaveRef.current=bassWave;},[bassWave]);useEffect(()=>{synthWaveRef.current=synthWave;},[synthWave]);useEffect(()=>{fmIndexRef.current=fmIndex;},[fmIndex]);
   useEffect(()=>{recordingsRef.current=recordings;},[recordings]);
+  useEffect(()=>{LANE_KEYS.forEach(lane=>{const node=laneGainNodes.current[lane];if(node&&audioRef.current)node.gain.setTargetAtTime(laneVolumes[lane],audioRef.current.ctx.currentTime,0.02);});},[laneVolumes]);
 
   useEffect(()=>{try{const r=window.localStorage.getItem('cesira-project-autoload');if(r){const p=JSON.parse(r);if(p?.projectName)setProjectName(p.projectName);}const sr=window.localStorage.getItem('cesira-project-slots');if(sr){const ps=JSON.parse(sr);if(Array.isArray(ps))setProjectSlots(ps.slice(0,4));}}catch{}},[]);
   useEffect(()=>{try{window.localStorage.setItem('cesira-project-slots',JSON.stringify(projectSlots));}catch{}},[projectSlots]);
   useEffect(()=>()=>{if(schedulerRef.current)clearInterval(schedulerRef.current);if(audioRef.current?.ctx?.state&&audioRef.current.ctx.state!=='closed')audioRef.current.ctx.close().catch(()=>{});recordingsRef.current.forEach(i=>URL.revokeObjectURL(i.url));},[]);
 
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const onKey=e=>{
+      if(e.target.tagName==='INPUT')return;
+      if(e.code==='Space'){e.preventDefault();togglePlay();}
+      else if(e.code==='KeyR'&&!e.metaKey&&!e.ctrlKey)randomize();
+      else if(e.code==='Digit1')triggerLaneNow('kick',1);
+      else if(e.code==='Digit2')triggerLaneNow('snare',1);
+      else if(e.code==='Digit3')triggerLaneNow('hat',1);
+      else if(e.code==='Digit4')triggerLaneNow('bass',1);
+      else if(e.code==='Digit5')triggerLaneNow('synth',1);
+      else if(e.code==='KeyZ'&&(e.metaKey||e.ctrlKey)&&!e.shiftKey)undo();
+      else if(e.code==='KeyZ'&&(e.metaKey||e.ctrlKey)&&e.shiftKey)redo();
+      else if(e.code==='KeyT')tapTempo();
+    };
+    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
+  },[]);
+
+  // MIDI init
+  useEffect(()=>{
+    if(!navigator.requestMIDIAccess)return;
+    navigator.requestMIDIAccess().then(midi=>{midiRef.current=midi;setMidiEnabled(true);setStatusText('MIDI ready.');}).catch(()=>{});
+  },[]);
+
+  // Send MIDI note
+  const sendMidi=(ch,note,vel,durationMs=100)=>{
+    if(!midiRef.current)return;
+    const outputs=[...midiRef.current.outputs.values()];if(!outputs.length)return;
+    const out=outputs[0];const midiVel=Math.round(clamp(vel,0,1)*127);
+    out.send([0x90+(ch-1),note,midiVel]);setTimeout(()=>out.send([0x80+(ch-1),note,0]),durationMs);
+  };
+
+  // Send MIDI clock
+  const midiClockCountRef=useRef(0);
+  const sendMidiClock=()=>{
+    if(!midiRef.current)return;const outputs=[...midiRef.current.outputs.values()];if(!outputs.length)return;
+    outputs[0].send([0xF8]);// clock tick
+  };
+
   // ─── Audio Engine ─────────────────────────────────────────────────────────
   const setDriveCurve=(node,amount=0.2)=>{
-    const k=2+clamp(amount,0,1)*80; // reduced max drive to avoid clipping
-    const s=512,c=new Float32Array(s);
+    const k=2+clamp(amount,0,1)*70;const s=512,c=new Float32Array(s);
     for(let i=0;i<s;i++){const x=(i*2)/s-1;c[i]=((1+k)*x)/(1+k*Math.abs(x));}
     node.curve=c;node.oversample='2x';
   };
 
   const initAudio=async()=>{
     if(audioRef.current){await audioRef.current.ctx.resume();setIsReady(true);return;}
-    const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx){setStatusText('Web Audio not supported.');return;}
-    const ctx=new AudioCtx({sampleRate:44100, latencyHint:'interactive'}); // 44100 for better browser compat
-    const inputBus=ctx.createGain();
-    inputBus.gain.value=0.9; // headroom
+    const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
+    const ctx=new AudioCtx({sampleRate:44100,latencyHint:'interactive'});
+    const inputBus=ctx.createGain();inputBus.gain.value=0.88;
     const preDrive=ctx.createWaveShaper();
-    const toneFilter=ctx.createBiquadFilter();
-    toneFilter.type='lowpass';toneFilter.frequency.value=16000;toneFilter.Q.value=0.5;
-    const compressor=ctx.createDynamicsCompressor();
-    compressor.threshold.value=-18;compressor.knee.value=12;compressor.ratio.value=4;compressor.attack.value=0.005;compressor.release.value=0.12;
-    const limiter=ctx.createDynamicsCompressor();
-    limiter.threshold.value=-2;limiter.knee.value=0;limiter.ratio.value=20;limiter.attack.value=0.001;limiter.release.value=0.05;
-    const dry=ctx.createGain(),wet=ctx.createGain();
-    const splitter=ctx.createChannelSplitter(2),merger=ctx.createChannelMerger(2);
-    const leftDelay=ctx.createDelay(0.5),rightDelay=ctx.createDelay(0.5);
-    const feedback=ctx.createGain(),toneEcho=ctx.createBiquadFilter();
+    const toneFilter=ctx.createBiquadFilter();toneFilter.type='lowpass';toneFilter.frequency.value=16000;toneFilter.Q.value=0.5;
+    const compressor=ctx.createDynamicsCompressor();compressor.threshold.value=-18;compressor.knee.value=12;compressor.ratio.value=4;compressor.attack.value=0.005;compressor.release.value=0.12;
+    const limiter=ctx.createDynamicsCompressor();limiter.threshold.value=-2;limiter.knee.value=0;limiter.ratio.value=20;limiter.attack.value=0.001;limiter.release.value=0.05;
+    const dry=ctx.createGain(),wet=ctx.createGain(),splitter=ctx.createChannelSplitter(2),merger=ctx.createChannelMerger(2);
+    const leftDelay=ctx.createDelay(0.5),rightDelay=ctx.createDelay(0.5),feedback=ctx.createGain(),toneEcho=ctx.createBiquadFilter();
     toneEcho.type='lowpass';toneEcho.frequency.value=5000;
-    const output=ctx.createGain(),analyser=ctx.createAnalyser(),dest=ctx.createMediaStreamDestination();
-    analyser.fftSize=256;analyser.smoothingTimeConstant=0.7;
-    inputBus.connect(preDrive);preDrive.connect(toneFilter);toneFilter.connect(compressor);
-    compressor.connect(dry);compressor.connect(splitter);
-    splitter.connect(leftDelay,0);splitter.connect(rightDelay,1);
-    rightDelay.connect(toneEcho);toneEcho.connect(feedback);feedback.connect(leftDelay);
-    leftDelay.connect(merger,0,0);rightDelay.connect(merger,0,1);
-    merger.connect(wet);dry.connect(output);wet.connect(output);
+    const output=ctx.createGain();
+    const analyser=ctx.createAnalyser();analyser.fftSize=512;analyser.smoothingTimeConstant=0.8;
+    const dest=ctx.createMediaStreamDestination();
+    inputBus.connect(preDrive);preDrive.connect(toneFilter);toneFilter.connect(compressor);compressor.connect(dry);compressor.connect(splitter);
+    splitter.connect(leftDelay,0);splitter.connect(rightDelay,1);rightDelay.connect(toneEcho);toneEcho.connect(feedback);feedback.connect(leftDelay);
+    leftDelay.connect(merger,0,0);rightDelay.connect(merger,0,1);merger.connect(wet);dry.connect(output);wet.connect(output);
     output.connect(limiter);limiter.connect(analyser);limiter.connect(ctx.destination);limiter.connect(dest);
     audioRef.current={ctx,inputBus,preDrive,toneFilter,compressor,limiter,dry,wet,leftDelay,rightDelay,feedback,output,analyser,dest};
+    setScopeAnalyser(analyser);
     setDriveCurve(preDrive,fxScenes[fxPreset].drive*0.5);
     setIsReady(true);setStatusText('Audio online.');applyFxScene(fxPreset,false,ctx.currentTime);
   };
@@ -358,215 +415,197 @@ export default function CesiraV1(){
   const applyFxScene=(idx,flash=true,nowTime)=>{
     setFxPreset(idx);const audio=audioRef.current;if(!audio)return;
     const fx=fxScenes[idx],now=nowTime??audio.ctx.currentTime,macro=macroKnobRef.current;
-    setDriveCurve(audio.preDrive,(fx.drive*0.5)+noise*0.08+macro*0.06);
-    audio.toneFilter.frequency.cancelScheduledValues(now);audio.toneFilter.frequency.linearRampToValueAtTime(2000+12000*fx.filter*tone+macro*1200,now+0.04);
+    setDriveCurve(audio.preDrive,(fx.drive*0.5)+noise*0.07+macro*0.05);
+    audio.toneFilter.frequency.cancelScheduledValues(now);audio.toneFilter.frequency.linearRampToValueAtTime(2200+12000*fx.filter*tone+macro*1000,now+0.04);
     audio.leftDelay.delayTime.cancelScheduledValues(now);audio.rightDelay.delayTime.cancelScheduledValues(now);
     audio.leftDelay.delayTime.linearRampToValueAtTime(0.02+fx.delay*0.16+space*0.02,now+0.04);
     audio.rightDelay.delayTime.linearRampToValueAtTime(0.03+fx.delay*0.21+space*0.035,now+0.04);
-    audio.feedback.gain.cancelScheduledValues(now);audio.feedback.gain.linearRampToValueAtTime(clamp(0.1+space*0.18+fx.delay*0.22+macro*0.06,0.05,0.45),now+0.04);
+    audio.feedback.gain.cancelScheduledValues(now);audio.feedback.gain.linearRampToValueAtTime(clamp(0.1+space*0.18+fx.delay*0.22+macro*0.05,0.05,0.42),now+0.04);
     audio.wet.gain.cancelScheduledValues(now);audio.dry.gain.cancelScheduledValues(now);
-    audio.wet.gain.linearRampToValueAtTime(clamp(fx.width*0.32+space*0.18+macro*0.06,0.04,0.4),now+0.04);
-    audio.dry.gain.linearRampToValueAtTime(clamp(0.92-fx.width*0.14-macro*0.05,0.6,0.96),now+0.04);
+    audio.wet.gain.linearRampToValueAtTime(clamp(fx.width*0.3+space*0.16+macro*0.05,0.04,0.38),now+0.04);
+    audio.dry.gain.linearRampToValueAtTime(clamp(0.9-fx.width*0.12-macro*0.04,0.62,0.94),now+0.04);
     audio.output.gain.cancelScheduledValues(now);audio.output.gain.linearRampToValueAtTime(master,now+0.04);
   };
   useEffect(()=>{if(!audioRef.current)return;applyFxScene(fxPreset,false);},[fxPreset,tone,space,noise]);
   useEffect(()=>{const a=audioRef.current;if(!a)return;a.output.gain.setTargetAtTime(master,a.ctx.currentTime,0.03);},[master]);
-  useEffect(()=>{const a=audioRef.current;if(!a)return;const n=a.ctx.currentTime;a.compressor.threshold.setTargetAtTime(-10-compressAmount*18,n,0.04);a.compressor.ratio.setTargetAtTime(2+compressAmount*7,n,0.04);a.compressor.attack.setTargetAtTime(0.003+(1-compressAmount)*0.022,n,0.04);a.compressor.release.setTargetAtTime(0.06+compressAmount*0.22,n,0.04);a.compressor.knee.setTargetAtTime(6+compressAmount*18,n,0.04);},[compressAmount]);
+  useEffect(()=>{const a=audioRef.current;if(!a)return;const n=a.ctx.currentTime;a.compressor.threshold.setTargetAtTime(-10-compressAmount*16,n,0.04);a.compressor.ratio.setTargetAtTime(2+compressAmount*6,n,0.04);a.compressor.attack.setTargetAtTime(0.003+(1-compressAmount)*0.02,n,0.04);a.compressor.release.setTargetAtTime(0.06+compressAmount*0.2,n,0.04);a.compressor.knee.setTargetAtTime(6+compressAmount*16,n,0.04);},[compressAmount]);
 
-  // Per-lane gain nodes (created once, reused)
-  const laneGainNodes=useRef({});
-  const getLaneGainNode=(lane)=>{
+  const getLaneGain=(lane)=>{
     const audio=audioRef.current;if(!audio)return null;
-    if(!laneGainNodes.current[lane]){
-      const g=audio.ctx.createGain();g.gain.value=laneVolumesRef.current[lane]??1;g.connect(audio.inputBus);laneGainNodes.current[lane]=g;
-    }
+    if(!laneGainNodes.current[lane]){const g=audio.ctx.createGain();g.gain.value=laneVolumesRef.current[lane]??1;g.connect(audio.inputBus);laneGainNodes.current[lane]=g;}
     return laneGainNodes.current[lane];
   };
 
-  useEffect(()=>{
-    // sync lane volumes to gain nodes
-    LANE_KEYS.forEach(lane=>{const node=laneGainNodes.current[lane];if(node&&audioRef.current)node.gain.setTargetAtTime(laneVolumes[lane],audioRef.current.ctx.currentTime,0.02);});
-  },[laneVolumes]);
-
-  const routeLaneFx=(sourceNode,lane,audioNow)=>{
+  const routeLaneFx=(sourceNode,lane)=>{
     const audio=audioRef.current;if(!audio)return[];
     const macro=macroKnobRef.current,fx=laneFxRef.current[lane]||{drive:0,tone:0.7,echo:0,crush:0,pan:0};
     const ld=audio.ctx.createWaveShaper(),lt=audio.ctx.createBiquadFilter(),echo=audio.ctx.createDelay(0.35),eg=audio.ctx.createGain(),et=audio.ctx.createBiquadFilter(),pan=audio.ctx.createStereoPanner();
-    setDriveCurve(ld,clamp(fx.drive*0.6+macro*0.08,0,0.8));
-    lt.type=lane==='hat'?'highpass':'lowpass';lt.frequency.value=lane==='hat'?1400+fx.tone*7000:200+fx.tone*6500;lt.Q.value=0.4+fx.crush*1.5;
-    echo.delayTime.value=0.04+fx.echo*0.2;eg.gain.value=clamp(fx.echo*0.22,0,0.32);et.type='lowpass';et.frequency.value=1500+fx.tone*4000;pan.pan.value=clamp(fx.pan,-1,1);
-    const dest=getLaneGainNode(lane)||audio.inputBus;
+    setDriveCurve(ld,clamp(fx.drive*0.55+macro*0.07,0,0.75));
+    lt.type=lane==='hat'?'highpass':'lowpass';lt.frequency.value=lane==='hat'?1400+fx.tone*7000:200+fx.tone*6500;lt.Q.value=0.4+fx.crush*1.4;
+    echo.delayTime.value=0.04+fx.echo*0.19;eg.gain.value=clamp(fx.echo*0.2,0,0.3);et.type='lowpass';et.frequency.value=1400+fx.tone*3800;pan.pan.value=clamp(fx.pan,-1,1);
+    const dest=getLaneGain(lane)||audio.inputBus;
     sourceNode.connect(ld);ld.connect(lt);lt.connect(pan);pan.connect(dest);
     if(fx.echo>0.01){lt.connect(echo);echo.connect(et);et.connect(eg);eg.connect(pan);}
     return[ld,lt,echo,eg,et,pan];
   };
 
-  const rampEnv=(param,now,attack,decay,peak,end=0.0001)=>{
-    param.cancelScheduledValues(now);param.setValueAtTime(0.0001,now);
-    param.exponentialRampToValueAtTime(Math.max(0.0001,peak),now+Math.max(0.001,attack));
-    param.exponentialRampToValueAtTime(Math.max(0.0001,end),now+Math.max(0.002,attack+decay));
-  };
-  const createNoiseBuffer=(len=0.2,amount=1)=>{
-    const a=audioRef.current;const buf=a.ctx.createBuffer(1,Math.floor(a.ctx.sampleRate*len),a.ctx.sampleRate);
-    const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*amount;return buf;
-  };
-  const safeStart=(node,when)=>{try{node.start(when);}catch{}};
-  const safeStop=(node,when)=>{try{node.stop(when);}catch{}};
-  const attachCleanup=(src,nodes=[],ms=1200)=>{const fn=()=>{[src,...nodes].forEach(n=>{try{n.disconnect();}catch{}});};src.onended=fn;window.setTimeout(fn,ms);};
-  const resolveDrumFxLane=(type)=>{if(type==='kick'||type==='kick2'||type==='tom')return'kick';if(type==='snare'||type==='snare2'||type==='clap')return'snare';return'hat';};
+  const rampEnv=(param,now,attack,decay,peak,end=0.0001)=>{param.cancelScheduledValues(now);param.setValueAtTime(0.0001,now);param.exponentialRampToValueAtTime(Math.max(0.0001,peak),now+Math.max(0.001,attack));param.exponentialRampToValueAtTime(Math.max(0.0001,end),now+Math.max(0.002,attack+decay));};
+  const createNoise=(len=0.2,amount=1)=>{const a=audioRef.current;const buf=a.ctx.createBuffer(1,Math.floor(a.ctx.sampleRate*len),a.ctx.sampleRate);const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*amount;return buf;};
+  const safeStart=(n,t)=>{try{n.start(t);}catch{}};const safeStop=(n,t)=>{try{n.stop(t);}catch{}};
+  const cleanup=(src,nodes,ms)=>{const fn=()=>[src,...nodes].forEach(n=>{try{n.disconnect();}catch{}});src.onended=fn;setTimeout(fn,ms);};
   const pickWave=(mode,family)=>{if(family==='bass'&&bassWaveRef.current!=='auto')return bassWaveRef.current;if(family==='synth'&&synthWaveRef.current!=='auto')return synthWaveRef.current;return mode;};
+  const resolveDrumFx=(type)=>{if(type==='kick'||type==='kick2'||type==='tom')return'kick';if(type==='snare'||type==='snare2'||type==='clap')return'snare';return'hat';};
 
-  // Flash VU for a lane
   const flashLane=useCallback((lane,level=1)=>{
-    setLaneVU(prev=>({...prev,[lane]:Math.min(1,level)}));
-    setPadFlash(prev=>({...prev,[lane]:Date.now()}));
-    const decay=()=>{setLaneVU(prev=>({...prev,[lane]:Math.max(0,prev[lane]-0.15)}));};
-    const id=setInterval(decay,50);vuDecayRef.current[lane]=id;
-    setTimeout(()=>{clearInterval(id);setLaneVU(prev=>({...prev,[lane]:0}));},600);
+    setLaneVU(prev=>({...prev,[lane]:Math.min(1,level)}));setPadFlash(prev=>({...prev,[lane]:Date.now()}));
+    if(vuTimers.current[lane])clearInterval(vuTimers.current[lane]);
+    vuTimers.current[lane]=setInterval(()=>setLaneVU(prev=>{const nv=Math.max(0,prev[lane]-0.18);if(nv<=0)clearInterval(vuTimers.current[lane]);return{...prev,[lane]:nv};}),55);
   },[]);
 
-  // ─── Sound synthesis (scheduled, audioNow = exact Web Audio time) ──────────
-  const playDrumAt=(pi,accent,audioNow)=>{
-    const audio=audioRef.current;if(!audio)return;
-    const p=drumPresets[pi],nb=createNoiseBuffer(0.22,0.25+noise*0.6);
+  // ─── FM synthesis helper (true FM: modulator drives carrier frequency) ─────
+  const makeFmPair=(ctx,carrierFreq,modRatio,modIndex,carrierType='sine')=>{
+    const carrier=ctx.createOscillator(),modulator=ctx.createOscillator(),modGain=ctx.createGain();
+    carrier.type=carrierType;carrier.frequency.value=carrierFreq;
+    modulator.type='sine';modulator.frequency.value=carrierFreq*modRatio;
+    modGain.gain.value=carrierFreq*modIndex; // FM index scales with carrier freq
+    modulator.connect(modGain);modGain.connect(carrier.frequency);
+    return{carrier,modulator,modGain};
+  };
+
+  // ─── Sound synthesis ───────────────────────────────────────────────────────
+  const playDrumAt=(pi,accent,t)=>{
+    const audio=audioRef.current;if(!audio)return;const p=drumPresets[pi],nb=createNoise(0.2,0.22+noise*0.55);
     if(p.type.startsWith('kick')){
       const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain(),sh=audio.ctx.createWaveShaper();
-      setDriveCurve(sh,0.15+noise*0.15);osc.type=p.type==='kick'?'sine':'triangle';
-      osc.frequency.setValueAtTime(p.type==='kick'?110:90,audioNow);osc.frequency.exponentialRampToValueAtTime(42,audioNow+0.14);
-      rampEnv(g.gain,audioNow,0.001,0.1+drumDecay*0.22,0.9*accent);
-      osc.connect(sh);sh.connect(g);const fx=routeLaneFx(g,'kick',audioNow);attachCleanup(osc,[g,sh,...fx],600);safeStart(osc,audioNow);safeStop(osc,audioNow+0.28);return;
+      setDriveCurve(sh,0.12+noise*0.12);osc.type=p.type==='kick'?'sine':'triangle';osc.frequency.setValueAtTime(p.type==='kick'?108:88,t);osc.frequency.exponentialRampToValueAtTime(40,t+0.13);
+      rampEnv(g.gain,t,0.001,0.1+drumDecay*0.2,0.88*accent);osc.connect(sh);sh.connect(g);const fx=routeLaneFx(g,'kick');cleanup(osc,[g,sh,...fx],600);safeStart(osc,t);safeStop(osc,t+0.26);return;
     }
     if(p.type==='tom'){
-      const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='sine';
-      osc.frequency.setValueAtTime(160,audioNow);osc.frequency.exponentialRampToValueAtTime(84,audioNow+0.16);
-      rampEnv(g.gain,audioNow,0.001,0.09+drumDecay*0.2,0.78*accent);
-      osc.connect(g);const fx=routeLaneFx(g,'kick',audioNow);attachCleanup(osc,[g,...fx],600);safeStart(osc,audioNow);safeStop(osc,audioNow+0.24);return;
+      const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='sine';osc.frequency.setValueAtTime(155,t);osc.frequency.exponentialRampToValueAtTime(80,t+0.15);
+      rampEnv(g.gain,t,0.001,0.08+drumDecay*0.18,0.75*accent);osc.connect(g);const fx=routeLaneFx(g,'kick');cleanup(osc,[g,...fx],600);safeStart(osc,t);safeStop(osc,t+0.22);return;
     }
     const src=audio.ctx.createBufferSource(),fil=audio.ctx.createBiquadFilter(),g=audio.ctx.createGain();src.buffer=nb;
     switch(p.type){
-      case'snare':fil.type='bandpass';fil.frequency.value=1700;fil.Q.value=1.2;rampEnv(g.gain,audioNow,0.001,0.07+drumDecay*0.15,0.65*accent);break;
-      case'snare2':fil.type='highpass';fil.frequency.value=1300;rampEnv(g.gain,audioNow,0.001,0.045+drumDecay*0.12,0.52*accent);break;
-      case'hat':fil.type='highpass';fil.frequency.value=7000;rampEnv(g.gain,audioNow,0.001,0.012+drumDecay*0.06,0.32*accent);break;
-      case'hat2':fil.type='highpass';fil.frequency.value=9000;rampEnv(g.gain,audioNow,0.001,0.008+drumDecay*0.04,0.26*accent);break;
-      case'clap':fil.type='bandpass';fil.frequency.value=2000;fil.Q.value=1.5;g.gain.setValueAtTime(0.0001,audioNow);g.gain.linearRampToValueAtTime(0.5*accent,audioNow+0.003);g.gain.linearRampToValueAtTime(0.07,audioNow+0.036);g.gain.linearRampToValueAtTime(0.3*accent,audioNow+0.058);g.gain.linearRampToValueAtTime(0.0001,audioNow+0.14);break;
-      case'metal':fil.type='bandpass';fil.frequency.value=4500;fil.Q.value=3;rampEnv(g.gain,audioNow,0.001,0.025+drumDecay*0.12,0.28*accent);break;
-      default:fil.type='bandpass';fil.frequency.value=2400;rampEnv(g.gain,audioNow,0.001,0.07+drumDecay*0.15,0.4*accent);break;
+      case'snare':fil.type='bandpass';fil.frequency.value=1600;fil.Q.value=1.1;rampEnv(g.gain,t,0.001,0.065+drumDecay*0.14,0.6*accent);break;
+      case'snare2':fil.type='highpass';fil.frequency.value=1200;rampEnv(g.gain,t,0.001,0.04+drumDecay*0.11,0.48*accent);break;
+      case'hat':fil.type='highpass';fil.frequency.value=7200;rampEnv(g.gain,t,0.001,0.01+drumDecay*0.055,0.3*accent);break;
+      case'hat2':fil.type='highpass';fil.frequency.value=9500;rampEnv(g.gain,t,0.001,0.007+drumDecay*0.035,0.24*accent);break;
+      case'clap':fil.type='bandpass';fil.frequency.value=1900;fil.Q.value=1.4;g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(0.46*accent,t+0.003);g.gain.linearRampToValueAtTime(0.06,t+0.033);g.gain.linearRampToValueAtTime(0.28*accent,t+0.054);g.gain.linearRampToValueAtTime(0.0001,t+0.13);break;
+      case'metal':fil.type='bandpass';fil.frequency.value=4200;fil.Q.value=3;rampEnv(g.gain,t,0.001,0.022+drumDecay*0.1,0.25*accent);break;
+      default:fil.type='bandpass';fil.frequency.value=2300;rampEnv(g.gain,t,0.001,0.06+drumDecay*0.13,0.38*accent);break;
     }
-    src.playbackRate.value=0.97+Math.random()*0.06;src.connect(fil);fil.connect(g);const fxn=routeLaneFx(g,resolveDrumFxLane(p.type),audioNow);attachCleanup(src,[fil,g,...fxn],800);safeStart(src,audioNow);safeStop(src,audioNow+0.22);
+    src.playbackRate.value=0.97+Math.random()*0.06;src.connect(fil);fil.connect(g);const fxn=routeLaneFx(g,resolveDrumFx(p.type));cleanup(src,[fil,g,...fxn],750);safeStart(src,t);safeStop(src,t+0.2);
   };
 
-  const playBassAt=(pi,note,accent,audioNow)=>{
-    const audio=audioRef.current;if(!audio)return;
-    const p=bassPresets[pi],f=noteToFreq[note]||110,bs=pickWave(p.mode,'bass');
-    const o1=audio.ctx.createOscillator(),o2=audio.ctx.createOscillator(),g=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter(),sub=audio.ctx.createGain(),tg=audio.ctx.createGain(),lfo=audio.ctx.createOscillator(),lg=audio.ctx.createGain();
-    o1.type=bs==='sine'?'sine':bs==='triangle'?'triangle':bs==='square'?'square':['sub','tube','wet'].includes(p.mode)?'sine':['pulse','bit'].includes(p.mode)?'square':'sawtooth';
-    o2.type=bs==='triangle'?'triangle':bs==='square'?'square':p.mode==='fm'?'triangle':'sawtooth';
-    o1.frequency.setValueAtTime(f,audioNow);o2.frequency.setValueAtTime(f*(p.mode==='fm'?2.01:1.005),audioNow);
-    sub.gain.value=bassSubAmount*(p.mode==='sub'?0.9:0.4);tg.gain.value=0.15+noise*0.12;
-    fil.type=p.mode==='bit'?'highpass':'lowpass';fil.frequency.setValueAtTime(80+bassCutoff*2200+tone*900+pi*14,audioNow);fil.Q.value=0.5+resonance*6+(p.mode==='grit'?0.6:0);
-    lfo.frequency.value=0.4+bassLfo*9;lg.gain.value=clamp(bassLfo*12+(p.mode==='drone'?3:0),0,30);
-    lfo.connect(lg);lg.connect(fil.frequency);rampEnv(g.gain,audioNow,0.003,p.mode==='drone'?0.62:0.26,0.76*accent);
-    o1.connect(sub);o2.connect(tg);sub.connect(fil);tg.connect(fil);fil.connect(g);
-    const fxn=routeLaneFx(g,'bass',audioNow);attachCleanup(o1,[o2,lfo,sub,tg,fil,g,lg,...fxn],1100);
-    safeStart(o1,audioNow);safeStart(o2,audioNow);safeStart(lfo,audioNow);safeStop(o1,audioNow+0.52);safeStop(o2,audioNow+0.52);safeStop(lfo,audioNow+0.52);
+  const playBassAt=(pi,note,accent,t)=>{
+    const audio=audioRef.current;if(!audio)return;const p=bassPresets[pi],f=noteToFreq[note]||110,bs=pickWave(p.mode,'bass');
+    const g=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter();
+    fil.type=p.mode==='bit'?'highpass':'lowpass';fil.frequency.setValueAtTime(80+bassCutoff*2000+tone*800+pi*12,t);fil.Q.value=0.5+resonance*5+(p.mode==='grit'?0.5:0);
+    rampEnv(g.gain,t,0.003,p.mode==='drone'?0.58:0.24,0.72*accent);
+
+    if(p.mode==='fm'||p.mode==='bit'){
+      // True FM synthesis
+      const idx=fmIndexRef.current*(p.mode==='bit'?3:1.5);
+      const{carrier,modulator,modGain}=makeFmPair(audio.ctx,f,p.mode==='fm'?2.0:3.0,idx,'sine');
+      const sub=audio.ctx.createGain();sub.gain.value=bassSubAmount*0.4;
+      const subOsc=audio.ctx.createOscillator();subOsc.type='sine';subOsc.frequency.value=f*0.5;
+      carrier.connect(fil);subOsc.connect(sub);sub.connect(fil);fil.connect(g);
+      const fxn=routeLaneFx(g,'bass');cleanup(carrier,[modulator,modGain,sub,subOsc,fil,g,...fxn],1100);
+      safeStart(carrier,t);safeStart(modulator,t);safeStart(subOsc,t);safeStop(carrier,t+0.52);safeStop(modulator,t+0.52);safeStop(subOsc,t+0.52);
+      sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,520);return;
+    }
+
+    const o1=audio.ctx.createOscillator(),o2=audio.ctx.createOscillator(),sub=audio.ctx.createGain(),tg=audio.ctx.createGain(),lfo=audio.ctx.createOscillator(),lg=audio.ctx.createGain();
+    o1.type=bs==='sine'?'sine':bs==='triangle'?'triangle':bs==='square'?'square':['sub','tube','wet'].includes(p.mode)?'sine':['pulse'].includes(p.mode)?'square':'sawtooth';
+    o2.type=bs==='triangle'?'triangle':bs==='square'?'square':'sawtooth';
+    o1.frequency.setValueAtTime(f,t);o2.frequency.setValueAtTime(f*1.005,t);
+    sub.gain.value=bassSubAmount*(p.mode==='sub'?0.85:0.35);tg.gain.value=0.13+noise*0.1;
+    lfo.frequency.value=0.4+bassLfo*8;lg.gain.value=clamp(bassLfo*10+(p.mode==='drone'?2.5:0),0,28);
+    lfo.connect(lg);lg.connect(fil.frequency);o1.connect(sub);o2.connect(tg);sub.connect(fil);tg.connect(fil);fil.connect(g);
+    const fxn=routeLaneFx(g,'bass');cleanup(o1,[o2,lfo,sub,tg,fil,g,lg,...fxn],1100);
+    safeStart(o1,t);safeStart(o2,t);safeStart(lfo,t);safeStop(o1,t+0.5);safeStop(o2,t+0.5);safeStop(lfo,t+0.5);
+    sendMidi(LANE_CH.bass,noteToMidi[note]||48,accent,500);
   };
 
-  const playSynthAt=(pi,note,accent,audioNow)=>{
-    const audio=audioRef.current;if(!audio)return;
-    const p=synthPresets[pi],f=noteToFreq[note]||440,ss=pickWave(p.mode,'synth');
-    const oA=audio.ctx.createOscillator(),oB=audio.ctx.createOscillator(),mix=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter(),amp=audio.ctx.createGain();
+  const playSynthAt=(pi,note,accent,t)=>{
+    const audio=audioRef.current;if(!audio)return;const p=synthPresets[pi],f=noteToFreq[note]||440,ss=pickWave(p.mode,'synth');
+    const mix=audio.ctx.createGain(),fil=audio.ctx.createBiquadFilter(),amp=audio.ctx.createGain();
     const vib=audio.ctx.createOscillator(),vg=audio.ctx.createGain(),nn=audio.ctx.createBufferSource(),ng=audio.ctx.createGain();
-    nn.buffer=createNoiseBuffer(0.6,noise*0.8);
-    oA.type=ss==='sine'?'sine':ss==='triangle'?'triangle':ss==='square'?'square':['glass','bell','air'].includes(p.mode)?'triangle':['lead','star'].includes(p.mode)?'square':'sawtooth';
+    nn.buffer=createNoise(0.5,noise*0.7);
+    fil.type=['air','mist'].includes(p.mode)?'bandpass':'lowpass';fil.frequency.value=200+synthCutoff*6500+tone*1600+pi*18;fil.Q.value=0.6+resonance*4.5+(p.mode==='bell'?1.1:p.mode==='glass'?0.5:0);
+    vib.frequency.value=0.5+synthLfo*9;vg.gain.value=clamp(synthLfo*9+(['lead','star'].includes(p.mode)?1.2:0),0,22);
+    ng.gain.value=['mist','air','choir'].includes(p.mode)?0.12+noise*0.1:0.018;
+
+    if(['glass','bell','star','candy'].includes(p.mode)){
+      // FM synth for bell/glass timbres
+      const idx=fmIndexRef.current*(p.mode==='bell'?2:p.mode==='glass'?1.2:1.5);
+      const{carrier,modulator,modGain}=makeFmPair(audio.ctx,f,p.mode==='bell'?3.0:p.mode==='candy'?2.0:2.5,idx,'sine');
+      vib.connect(vg);vg.connect(carrier.frequency);vg.connect(modulator.frequency);nn.connect(ng);ng.connect(mix);carrier.connect(mix);mix.connect(fil);fil.connect(amp);
+      amp.gain.setValueAtTime(0.0001,t);amp.gain.linearRampToValueAtTime(0.44*accent,t+(0.004+synthAttack*0.14));amp.gain.exponentialRampToValueAtTime(0.0001,t+0.14+synthRelease*1.0+space*0.3);
+      const fxn=routeLaneFx(amp,'synth');cleanup(carrier,[modulator,modGain,vib,nn,mix,fil,amp,vg,ng,...fxn],1500);
+      safeStart(carrier,t);safeStart(modulator,t);safeStart(nn,t);safeStart(vib,t);safeStop(carrier,t+1.1);safeStop(modulator,t+1.1);safeStop(nn,t+1.1);safeStop(vib,t+1.1);
+      sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,1100);return;
+    }
+
+    const oA=audio.ctx.createOscillator(),oB=audio.ctx.createOscillator();
+    oA.type=ss==='sine'?'sine':ss==='triangle'?'triangle':ss==='square'?'square':['lead'].includes(p.mode)?'square':'sawtooth';
     oB.type=ss==='square'?'square':ss==='sine'?'sine':['pad','choir','mist'].includes(p.mode)?'sine':'triangle';
-    oA.frequency.value=f;oB.frequency.value=f*(['bell','star','candy'].includes(p.mode)?1.5:1.009);
-    fil.type=['air','mist'].includes(p.mode)?'bandpass':'lowpass';fil.frequency.value=200+synthCutoff*6800+tone*1800+pi*20;fil.Q.value=0.7+resonance*5+(p.mode==='bell'?1.2:p.mode==='glass'?0.6:0);
-    vib.frequency.value=0.5+synthLfo*10;vg.gain.value=clamp(synthLfo*10+(['lead','star'].includes(p.mode)?1.5:0),0,25);
-    ng.gain.value=['mist','air','choir'].includes(p.mode)?0.14+noise*0.12:0.02;
+    oA.frequency.value=f;oB.frequency.value=f*1.008;
     vib.connect(vg);vg.connect(oA.frequency);vg.connect(oB.frequency);oA.connect(mix);oB.connect(mix);nn.connect(ng);ng.connect(mix);mix.connect(fil);fil.connect(amp);
-    const fxn=routeLaneFx(amp,'synth',audioNow);attachCleanup(oA,[oB,vib,nn,mix,fil,amp,vg,ng,...fxn],1600);
-    amp.gain.setValueAtTime(0.0001,audioNow);amp.gain.linearRampToValueAtTime(0.48*accent,audioNow+(0.004+synthAttack*0.16));amp.gain.exponentialRampToValueAtTime(0.0001,audioNow+0.16+synthRelease*1.1+space*0.36);
-    safeStart(oA,audioNow);safeStart(oB,audioNow);safeStart(nn,audioNow);safeStart(vib,audioNow);
-    safeStop(oA,audioNow+1.2);safeStop(oB,audioNow+1.2);safeStop(nn,audioNow+1.2);safeStop(vib,audioNow+1.2);
+    amp.gain.setValueAtTime(0.0001,t);amp.gain.linearRampToValueAtTime(0.44*accent,t+(0.004+synthAttack*0.15));amp.gain.exponentialRampToValueAtTime(0.0001,t+0.15+synthRelease*1.05+space*0.32);
+    const fxn=routeLaneFx(amp,'synth');cleanup(oA,[oB,vib,nn,mix,fil,amp,vg,ng,...fxn],1500);
+    safeStart(oA,t);safeStart(oB,t);safeStart(nn,t);safeStart(vib,t);safeStop(oA,t+1.1);safeStop(oB,t+1.1);safeStop(nn,t+1.1);safeStop(vib,t+1.1);
+    sendMidi(LANE_CH.synth,noteToMidi[note]||60,accent,1100);
   };
 
-  const playMetronomeAt=(isDownbeat,audioNow)=>{
+  const playMetronomeAt=(isDownbeat,t)=>{
     const audio=audioRef.current;if(!audio||!metronomeOn)return;
-    const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='square';osc.frequency.setValueAtTime(isDownbeat?1760:1320,audioNow);
-    g.gain.setValueAtTime(0.0001,audioNow);g.gain.exponentialRampToValueAtTime(0.06*metronomeLevel,audioNow+0.002);g.gain.exponentialRampToValueAtTime(0.0001,audioNow+0.04);
-    osc.connect(g);g.connect(audio.inputBus);attachCleanup(osc,[g],120);safeStart(osc,audioNow);safeStop(osc,audioNow+0.05);
+    const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='square';osc.frequency.setValueAtTime(isDownbeat?1760:1320,t);
+    g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.055*metronomeLevel,t+0.002);g.gain.exponentialRampToValueAtTime(0.0001,t+0.035);
+    osc.connect(g);g.connect(audio.inputBus);cleanup(osc,[g],100);safeStart(osc,t);safeStop(osc,t+0.04);
   };
 
   // ─── Lookahead Scheduler ──────────────────────────────────────────────────
-  // This is the key fix: schedule audio events AHEAD using Web Audio clock,
-  // not setTimeout. UI updates happen separately via requestAnimationFrame.
-  const scheduleNote=(stepIdx,audioNow)=>{
-    const accent=stepIdx%4===0?1:0.86;
-    const lp=patternsRef.current,lsc=laneStepCountsRef.current;
-    if(metronomeOn&&stepIdx%4===0)playMetronomeAt(stepIdx%16===0,audioNow);
+  const scheduleNote=(stepIdx,t)=>{
+    const accent=stepIdx%4===0?1:0.86;const lp=patternsRef.current,lsc=laneStepCountsRef.current;
+    if(metronomeOn&&stepIdx%4===0)playMetronomeAt(stepIdx%16===0,t);
+    sendMidiClock();
     for(const lane of LANE_KEYS){
       const ll=lsc[lane]||stepCountRef.current,li=stepIdx%ll;
-      if(!lp[lane][li])continue;
-      const jitterSec=(Math.random()-0.5)*humanizeRef.current*0.025; // max ±12ms jitter
-      const t=audioNow+Math.max(0,jitterSec);
+      const sd=lp[lane][li];if(!sd||!sd.on)continue;
+      // Probability check
+      if(sd.prob<1&&Math.random()>sd.prob)continue;
+      const jitter=(Math.random()-0.5)*humanizeRef.current*0.022;
+      const noteT=t+Math.max(0,jitter);
       const ga=getGrooveAccent(grooveProfileRef.current,lane,li,grooveAmountRef.current);
-      const ma=1+macroKnobRef.current*0.15,finalAccent=clamp(accent*ga*ma,0.1,1.2);
-      if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),finalAccent,t);
-      else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:p<4?p:p%2===0?12:3,finalAccent,t);}
-      else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:p<6?p:p%2===0?13:5,finalAccent,t);}
-      else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||bassNotes[bassPresetRef.current%bassNotes.length],finalAccent,t);
-      else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||synthNotes[synthPresetRef.current%synthNotes.length],finalAccent,t);
-      // schedule UI flash slightly after note
-      window.setTimeout(()=>{flashLane(lane,finalAccent);},Math.max(0,(t-audioRef.current.ctx.currentTime)*1000+5));
-      // stutter
-      if(stutterOnRef.current&&Math.random()<0.18){
-        const b=stutterBurstRef.current;
-        for(let i=1;i<b;i++){
-          const st=t+i*0.04;
-          if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),0.65*ga,st);
-          else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:p<4?p:12,0.65*ga,st);}
-          else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:p<6?p:13,0.65*ga,st);}
-          else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',0.65*ga,st);
-          else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',0.65*ga,st);
-        }
-      }
+      const ma=1+macroKnobRef.current*0.14;
+      const finalAccent=clamp(accent*ga*ma*(sd.vel??1),0.1,1.2);
+      if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),finalAccent,noteT);
+      else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:p<4?p:p%2===0?12:3,finalAccent,noteT);}
+      else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:p<6?p:p%2===0?13:5,finalAccent,noteT);}
+      else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',finalAccent,noteT);
+      else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',finalAccent,noteT);
+      const flashDelay=Math.max(0,(noteT-audioRef.current.ctx.currentTime)*1000);
+      window.setTimeout(()=>flashLane(lane,finalAccent),flashDelay);
+      if(stutterOnRef.current&&Math.random()<0.16){const b=stutterBurstRef.current;for(let i=1;i<b;i++){const st=noteT+i*0.042;if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),0.62*ga,st);else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:3,0.62*ga,st);}else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:5,0.62*ga,st);}else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',0.62*ga,st);else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',0.62*ga,st);}}
     }
   };
 
-  const stepIntervalSec=(stepIdx)=>{
-    const baseMs=(60/bpmRef.current)*1000/4;
-    const isOdd=stepIdx%2===1;
-    const swingMs=isOdd?baseMs*swingRef.current:-baseMs*swingRef.current*0.5;
-    return Math.max(0.03,(baseMs+swingMs)/1000);
-  };
+  const stepInterval=(idx)=>{const bMs=(60/bpmRef.current)*1000/4;const sw=idx%2===1?bMs*swingRef.current:-bMs*swingRef.current*0.5;return Math.max(0.028,(bMs+sw)/1000);};
 
   const runScheduler=()=>{
-    const audio=audioRef.current;if(!audio||!isPlayingRef.current)return;
-    const now=audio.ctx.currentTime;
+    const audio=audioRef.current;if(!audio||!isPlayingRef.current)return;const now=audio.ctx.currentTime;
     while(nextNoteTimeRef.current<now+SCHEDULE_AHEAD){
-      const stepIdx=currentStepRef.current;
-      scheduleNote(stepIdx,nextNoteTimeRef.current);
-      // UI step update — schedule via timeout aligned to note time
+      const si=currentStepRef.current;scheduleNote(si,nextNoteTimeRef.current);
       const delay=Math.max(0,(nextNoteTimeRef.current-now)*1000);
-      window.setTimeout(()=>{
-        setStep(stepIdx);setPage(Math.floor(stepIdx/PAGE_SIZE));
-      },delay);
-      nextNoteTimeRef.current+=stepIntervalSec(stepIdx);
-      currentStepRef.current=(stepIdx+1)%stepCountRef.current;
+      window.setTimeout(()=>{setStep(si);setPage(Math.floor(si/PAGE_SIZE));},delay);
+      nextNoteTimeRef.current+=stepInterval(si);
+      currentStepRef.current=(si+1)%stepCountRef.current;
     }
   };
 
-  const startClock=()=>{
-    const audio=audioRef.current;if(!audio)return;
-    nextNoteTimeRef.current=audio.ctx.currentTime+0.05;
-    currentStepRef.current=0;
-    isPlayingRef.current=true;
-    schedulerRef.current=setInterval(runScheduler,LOOKAHEAD_MS);
-  };
-  const stopClock=()=>{
-    if(schedulerRef.current){clearInterval(schedulerRef.current);schedulerRef.current=null;}
-    isPlayingRef.current=false;setIsPlaying(false);setStep(0);
-  };
+  const startClock=()=>{const audio=audioRef.current;if(!audio)return;nextNoteTimeRef.current=audio.ctx.currentTime+0.06;currentStepRef.current=0;isPlayingRef.current=true;schedulerRef.current=setInterval(runScheduler,LOOKAHEAD_MS);};
+  const stopClock=()=>{if(schedulerRef.current){clearInterval(schedulerRef.current);schedulerRef.current=null;}isPlayingRef.current=false;setIsPlaying(false);setStep(0);};
 
   const togglePlay=async()=>{
     await initAudio();if(!audioRef.current)return;
@@ -575,47 +614,55 @@ export default function CesiraV1(){
     startClock();setIsPlaying(true);setStatusText('Running.');
   };
 
-  // Live trigger (for pads, not scheduled)
   const triggerLaneNow=async(lane,accent=1)=>{
-    await initAudio();setActiveLane(lane);
-    const audio=audioRef.current;if(!audio)return;
-    const now=audio.ctx.currentTime+0.002;
-    const li=currentStepRef.current%( laneStepCountsRef.current[lane]||stepCountRef.current);
-    if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),accent,now);
-    else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:p<4?p:p%2===0?12:3,accent,now);}
-    else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:p<6?p:p%2===0?13:5,accent,now);}
-    else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',accent,now);
-    else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',accent,now);
+    await initAudio();setActiveLane(lane);const audio=audioRef.current;if(!audio)return;
+    const t=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCountsRef.current[lane]||stepCountRef.current);
+    if(lane==='kick')playDrumAt(Math.min(drumPresetRef.current,1),accent,t);
+    else if(lane==='snare'){const p=drumPresetRef.current;playDrumAt(p<2?2:p<4?p:p%2===0?12:3,accent,t);}
+    else if(lane==='hat'){const p=drumPresetRef.current;playDrumAt(p<4?4:p<6?p:p%2===0?13:5,accent,t);}
+    else if(lane==='bass')playBassAt(bassPresetRef.current,bassLineRef.current[li]||'C2',accent,t);
+    else if(lane==='synth')playSynthAt(synthPresetRef.current,synthLineRef.current[li]||'C4',accent,t);
     flashLane(lane,accent);
   };
 
+  // Velocity-sensitive mousedown for pads
+  const padMouseRef=useRef({});
+  const onPadDown=(lane,e)=>{padMouseRef.current[lane]=e.timeStamp;};
+  const onPadUp=(lane,e)=>{const held=e.timeStamp-(padMouseRef.current[lane]||e.timeStamp);const vel=clamp(1-(held/500),0.3,1);triggerLaneNow(lane,vel);};
+
   // ─── Pattern ops ──────────────────────────────────────────────────────────
-  const toggleCell=(lane,idx)=>{if(idx>=laneStepCounts[lane])return;setPatterns(prev=>({...prev,[lane]:prev[lane].map((v,i)=>i===idx?!v:v)}));};
-  const clearAll=()=>{stopClock();setPatterns({kick:makeEmptyLane(),snare:makeEmptyLane(),hat:makeEmptyLane(),bass:makeEmptyLane(),synth:makeEmptyLane()});setBassLine(makeEmptyNotes('C2'));setSynthLine(makeEmptyNotes('C4'));setLaneStepCounts({kick:16,snare:16,hat:16,bass:16,synth:16});setSectionProfile('pulse-cell');setHarmonicProfile('minor');setGrooveProfile('steady');setStatusText('Cleared.');};
+  const toggleCell=(lane,idx)=>{
+    if(idx>=laneStepCounts[lane])return;
+    pushUndo(patterns);
+    setPatterns(prev=>({...prev,[lane]:prev[lane].map((s,i)=>i===idx?{...s,on:!s.on}:s)}));
+  };
+  const clearAll=()=>{stopClock();const empty={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};pushUndo(patterns);setPatterns(empty);setBassLine(makeEmptyNotes('C2'));setSynthLine(makeEmptyNotes('C4'));setLaneStepCounts({kick:16,snare:16,hat:16,bass:16,synth:16});setSectionProfile('pulse-cell');setHarmonicProfile('minor');setGrooveProfile('steady');setStatusText('Cleared.');};
   const handleStepCount=n=>{const s=clamp(n,16,MAX_STEPS);setLaneStepCounts({kick:s,snare:s,hat:s,bass:s,synth:s});};
-  const setLaneStepCount=(lane,n)=>{setLaneStepCounts(prev=>({...prev,[lane]:clamp(n,16,MAX_STEPS)}));};
-  const randomize=()=>{const fs=buildFreestylePattern(stepCount,laneStepCounts,density,chaos,{drumPreset,bassPreset,synthPreset},{autoLength:true});setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);setStatusText(`${fs.sectionProfile} · ${fs.grooveProfile} · ${fs.harmonicProfile}`);};
-  const autoJam=()=>{const fs=buildFreestylePattern(stepCount,laneStepCounts,clamp(density+0.08,0.1,0.95),clamp(chaos+0.12,0,1),{drumPreset,bassPreset,synthPreset},{autoLength:true});setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);setTone(clamp(0.35+Math.random()*0.55,0.1,1));setNoise(clamp(0.14+Math.random()*0.62,0,1));setSpace(clamp(0.12+Math.random()*0.58,0,1));setSwing(clamp(Math.random()*0.18,0,0.25));setBassCutoff(clamp(0.2+Math.random()*0.65,0,1));setSynthCutoff(clamp(0.28+Math.random()*0.62,0,1));setBassSubAmount(clamp(0.35+Math.random()*0.65,0.1,1));setSynthAttack(clamp(Math.random()*0.45,0,1));setSynthRelease(clamp(0.2+Math.random()*0.75,0,1));setLaneFx(prev=>({kick:{...prev.kick,drive:clamp(0.08+Math.random()*0.28,0,1),tone:clamp(0.3+Math.random()*0.42,0,1),echo:0},snare:{...prev.snare,drive:clamp(0.06+Math.random()*0.2,0,1),tone:clamp(0.42+Math.random()*0.35,0,1),echo:clamp(Math.random()*0.14,0,1)},hat:{...prev.hat,tone:clamp(0.6+Math.random()*0.32,0,1),crush:clamp(Math.random()*0.2,0,1)},bass:{...prev.bass,drive:clamp(0.08+Math.random()*0.26,0,1),tone:clamp(0.2+Math.random()*0.38,0,1),echo:clamp(Math.random()*0.08,0,1)},synth:{...prev.synth,drive:clamp(0.06+Math.random()*0.22,0,1),tone:clamp(0.46+Math.random()*0.38,0,1),echo:clamp(0.08+Math.random()*0.2,0,1)}}));setStatusText(`Auto Jam · ${fs.sectionProfile} · ${fs.grooveProfile}`);};
-  const triggerStutter=async()=>{await initAudio();const audio=audioRef.current;if(!audio)return;const b=Math.max(2,stutterBurst),now=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCounts[activeLane]||stepCount);for(let i=0;i<b;i++){const t=now+i*0.05;if(activeLane==='kick')playDrumAt(Math.min(drumPreset,1),i===0?1:0.72,t);else if(activeLane==='snare')playDrumAt(drumPreset<2?2:3,i===0?1:0.72,t);else if(activeLane==='hat')playDrumAt(drumPreset<4?4:5,i===0?1:0.72,t);else if(activeLane==='bass')playBassAt(bassPreset,bassLine[li]||'C2',i===0?1:0.72,t);else if(activeLane==='synth')playSynthAt(synthPreset,synthLine[li]||'C4',i===0?1:0.72,t);}flashLane(activeLane,1);setStatusText(`${activeLane.toUpperCase()} stutter x${b}.`);};
-  const fillLane=(lane,amount)=>{setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<laneStepCounts[lane];i++)n[lane][i]=Math.random()<amount;return n;});};
-  const rotateLane=(lane,dir=1)=>{setPatterns(prev=>{const len=laneStepCounts[lane],src=prev[lane].slice(0,len),s=src.map((_,i)=>src[(i-dir+len)%len]),n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<len;i++)n[lane][i]=s[i];return n;});};
-  const mutateLane=(lane)=>{setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]},len=laneStepCounts[lane],flips=Math.max(2,Math.floor(len*(0.05+chaos*0.08)));for(let i=0;i<flips;i++){const pos=Math.floor(Math.random()*len);n[lane][pos]=!n[lane][pos];}return n;});};
+  const setLaneStepCount=(lane,n)=>setLaneStepCounts(prev=>({...prev,[lane]:clamp(n,16,MAX_STEPS)}));
+  const randomize=()=>{const fs=buildFreestylePattern(stepCount,laneStepCounts,density,chaos,{drumPreset,bassPreset,synthPreset},{autoLength:true});pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);setStatusText(`${fs.sectionProfile} · ${fs.grooveProfile} · ${fs.harmonicProfile}`);};
+  const autoJam=()=>{const fs=buildFreestylePattern(stepCount,laneStepCounts,clamp(density+0.08,0.1,0.95),clamp(chaos+0.12,0,1),{drumPreset,bassPreset,synthPreset},{autoLength:true});pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);setTone(clamp(0.35+Math.random()*0.55,0.1,1));setNoise(clamp(0.14+Math.random()*0.62,0,1));setSpace(clamp(0.12+Math.random()*0.58,0,1));setSwing(clamp(Math.random()*0.18,0,0.25));setBassCutoff(clamp(0.2+Math.random()*0.65,0,1));setSynthCutoff(clamp(0.28+Math.random()*0.62,0,1));setBassSubAmount(clamp(0.35+Math.random()*0.65,0.1,1));setSynthAttack(clamp(Math.random()*0.45,0,1));setSynthRelease(clamp(0.2+Math.random()*0.75,0,1));setLaneFx(prev=>({kick:{...prev.kick,drive:clamp(0.08+Math.random()*0.26,0,1),tone:clamp(0.3+Math.random()*0.4,0,1),echo:0},snare:{...prev.snare,drive:clamp(0.06+Math.random()*0.2,0,1),tone:clamp(0.42+Math.random()*0.33,0,1),echo:clamp(Math.random()*0.13,0,1)},hat:{...prev.hat,tone:clamp(0.6+Math.random()*0.3,0,1),crush:clamp(Math.random()*0.18,0,1)},bass:{...prev.bass,drive:clamp(0.08+Math.random()*0.24,0,1),tone:clamp(0.2+Math.random()*0.36,0,1),echo:clamp(Math.random()*0.07,0,1)},synth:{...prev.synth,drive:clamp(0.06+Math.random()*0.22,0,1),tone:clamp(0.46+Math.random()*0.36,0,1),echo:clamp(0.08+Math.random()*0.18,0,1)}}));setStatusText(`Auto Jam · ${fs.sectionProfile} · ${fs.grooveProfile}`);};
+  const triggerStutter=async()=>{await initAudio();const audio=audioRef.current;if(!audio)return;const b=Math.max(2,stutterBurst),t=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCounts[activeLane]||stepCount);for(let i=0;i<b;i++){const st=t+i*0.048;if(activeLane==='kick')playDrumAt(Math.min(drumPreset,1),i===0?1:0.7,st);else if(activeLane==='snare')playDrumAt(drumPreset<2?2:3,i===0?1:0.7,st);else if(activeLane==='hat')playDrumAt(drumPreset<4?4:5,i===0?1:0.7,st);else if(activeLane==='bass')playBassAt(bassPreset,bassLine[li]||'C2',i===0?1:0.7,st);else if(activeLane==='synth')playSynthAt(synthPreset,synthLine[li]||'C4',i===0?1:0.7,st);}flashLane(activeLane,1);setStatusText(`${activeLane.toUpperCase()} stutter x${b}.`);};
+
+  const fillLane=(lane,amount)=>{pushUndo(patterns);setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<laneStepCounts[lane];i++){n[lane][i]={...n[lane][i],on:Math.random()<amount,prob:clamp(0.6+Math.random()*0.4,0.5,1),vel:clamp(0.5+Math.random()*0.5,0.4,1)};}return n;});};
+  const rotateLane=(lane,dir=1)=>{pushUndo(patterns);setPatterns(prev=>{const len=laneStepCounts[lane],src=prev[lane].slice(0,len),s=src.map((_,i)=>src[(i-dir+len)%len]),n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<len;i++)n[lane][i]=s[i];return n;});};
+  const mutateLane=(lane)=>{pushUndo(patterns);setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]},len=laneStepCounts[lane],flips=Math.max(2,Math.floor(len*(0.05+chaos*0.08)));for(let i=0;i<flips;i++){const pos=Math.floor(Math.random()*len);n[lane][pos]={...n[lane][pos],on:!n[lane][pos].on};}return n;});};
   const getLaneNotePool=(lane)=>{const mode=MODES[harmonicProfileRef.current]||MODES.minor;return lane==='bass'?mode.bass:lane==='synth'?mode.synth:[];};
-  const setStepNote=(lane,idx,note)=>{if(lane==='bass'){if(idx>=laneStepCounts.bass||!patterns.bass[idx])return;setBassLine(prev=>prev.map((v,i)=>i===idx?note:v));}else if(lane==='synth'){if(idx>=laneStepCounts.synth||!patterns.synth[idx])return;setSynthLine(prev=>prev.map((v,i)=>i===idx?note:v));}};
-  const randomizeLaneNotes=(lane)=>{const pool=getLaneNotePool(lane);if(!pool.length)return;if(lane==='bass')setBassLine(prev=>prev.map((v,i)=>i<laneStepCounts.bass&&patterns.bass[i]?seededChoice(pool):v));else setSynthLine(prev=>prev.map((v,i)=>i<laneStepCounts.synth&&patterns.synth[i]?seededChoice(pool):v));};
-  const shiftLaneNotes=(lane,dir=1)=>{const pool=getLaneNotePool(lane);if(!pool.length)return;if(lane==='bass')setBassLine(prev=>prev.map((v,i)=>{if(i>=laneStepCounts.bass||!patterns.bass[i])return v;const at=pool.indexOf(v);return pool[at===-1?0:(at+dir+pool.length)%pool.length];}));else setSynthLine(prev=>prev.map((v,i)=>{if(i>=laneStepCounts.synth||!patterns.synth[i])return v;const at=pool.indexOf(v);return pool[at===-1?0:(at+dir+pool.length)%pool.length];}));};
+  const setStepNote=(lane,idx,note)=>{if(lane==='bass'){if(idx>=laneStepCounts.bass||!patterns.bass[idx].on)return;setBassLine(prev=>prev.map((v,i)=>i===idx?note:v));}else if(lane==='synth'){if(idx>=laneStepCounts.synth||!patterns.synth[idx].on)return;setSynthLine(prev=>prev.map((v,i)=>i===idx?note:v));}};
+  const randomizeLaneNotes=(lane)=>{const pool=getLaneNotePool(lane);if(!pool.length)return;if(lane==='bass')setBassLine(prev=>prev.map((v,i)=>i<laneStepCounts.bass&&patterns.bass[i].on?seededChoice(pool):v));else setSynthLine(prev=>prev.map((v,i)=>i<laneStepCounts.synth&&patterns.synth[i].on?seededChoice(pool):v));};
+  const shiftLaneNotes=(lane,dir=1)=>{const pool=getLaneNotePool(lane);if(!pool.length)return;if(lane==='bass')setBassLine(prev=>prev.map((v,i)=>{if(i>=laneStepCounts.bass||!patterns.bass[i].on)return v;const at=pool.indexOf(v);return pool[at===-1?0:(at+dir+pool.length)%pool.length];}));else setSynthLine(prev=>prev.map((v,i)=>{if(i>=laneStepCounts.synth||!patterns.synth[i].on)return v;const at=pool.indexOf(v);return pool[at===-1?0:(at+dir+pool.length)%pool.length];}));};
+
+  // Update step prob/vel/len inline
+  const setStepProp=(lane,idx,prop,val)=>{setPatterns(prev=>({...prev,[lane]:prev[lane].map((s,i)=>i===idx?{...s,[prop]:val}:s)}));};
 
   // ─── Tap Tempo ────────────────────────────────────────────────────────────
-  const tapTempo=()=>{
-    const now=Date.now();setTapTimes(prev=>{const next=[...prev.filter(t=>now-t<3000),now];if(next.length>=2){const intervals=next.slice(1).map((t,i)=>t-next[i]);const avg=intervals.reduce((a,b)=>a+b,0)/intervals.length;setBpm(clamp(Math.round(60000/avg),60,200));setStatusText(`TAP BPM: ${clamp(Math.round(60000/avg),60,200)}`);}return next.slice(-6);});
-  };
+  const tapTempo=()=>{const now=Date.now();setTapTimes(prev=>{const next=[...prev.filter(t=>now-t<3000),now];if(next.length>=2){const intervals=next.slice(1).map((t,i)=>t-next[i]);const avg=intervals.reduce((a,b)=>a+b,0)/intervals.length;const newBpm=clamp(Math.round(60000/avg),60,200);setBpm(newBpm);setStatusText(`TAP → ${newBpm} BPM`);}return next.slice(-6);});};
 
   // ─── Save/Load ────────────────────────────────────────────────────────────
-  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel});
+  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex});
   const applySnapshot=(snap,label='Loaded.')=>{
     if(!snap)return;stopClock();if(snap.projectName)setProjectName(snap.projectName);
     const n=(k,s)=>typeof snap[k]==='number'&&s(snap[k]),b=(k,s)=>typeof snap[k]==='boolean'&&s(snap[k]);
-    n('bpm',setBpm);n('swing',setSwing);n('density',setDensity);n('chaos',setChaos);n('tone',setTone);n('noise',setNoise);n('space',setSpace);n('master',setMaster);n('compressAmount',setCompressAmount);n('resonance',setResonance);n('bassLfo',setBassLfo);n('synthLfo',setSynthLfo);n('drumDecay',setDrumDecay);n('bassCutoff',setBassCutoff);n('synthCutoff',setSynthCutoff);n('bassSubAmount',setBassSubAmount);n('synthAttack',setSynthAttack);n('synthRelease',setSynthRelease);n('stutterBurst',setStutterBurst);n('macroKnob',setMacroKnob);n('grooveAmount',setGrooveAmount);n('metronomeLevel',setMetronomeLevel);n('drumPreset',setDrumPreset);n('bassPreset',setBassPreset);n('synthPreset',setSynthPreset);n('fxPreset',setFxPreset);
+    n('bpm',setBpm);n('swing',setSwing);n('density',setDensity);n('chaos',setChaos);n('tone',setTone);n('noise',setNoise);n('space',setSpace);n('master',setMaster);n('compressAmount',setCompressAmount);n('resonance',setResonance);n('bassLfo',setBassLfo);n('synthLfo',setSynthLfo);n('drumDecay',setDrumDecay);n('bassCutoff',setBassCutoff);n('synthCutoff',setSynthCutoff);n('bassSubAmount',setBassSubAmount);n('synthAttack',setSynthAttack);n('synthRelease',setSynthRelease);n('stutterBurst',setStutterBurst);n('macroKnob',setMacroKnob);n('grooveAmount',setGrooveAmount);n('metronomeLevel',setMetronomeLevel);n('drumPreset',setDrumPreset);n('bassPreset',setBassPreset);n('synthPreset',setSynthPreset);n('fxPreset',setFxPreset);n('fmIndex',setFmIndex);
     b('stutterOn',setStutterOn);b('metronomeOn',setMetronomeOn);
     if(snap.harmonicProfile)setHarmonicProfile(snap.harmonicProfile);if(snap.grooveProfile)setGrooveProfile(snap.grooveProfile);if(snap.sectionProfile)setSectionProfile(snap.sectionProfile);if(snap.bassWave)setBassWave(snap.bassWave);if(snap.synthWave)setSynthWave(snap.synthWave);
     if(snap.laneStepCounts)setLaneStepCounts(snap.laneStepCounts);if(snap.patterns)setPatterns(snap.patterns);if(snap.bassLine)setBassLine(snap.bassLine);if(snap.synthLine)setSynthLine(snap.synthLine);if(snap.laneFx)setLaneFx(snap.laneFx);if(snap.laneVolumes)setLaneVolumes(snap.laneVolumes);
@@ -628,64 +675,69 @@ export default function CesiraV1(){
   const saveProjectSlot=slot=>{setProjectSlots(prev=>prev.map((v,i)=>i===slot?{label:projectName||`P${slot+1}`,stamp:new Date().toLocaleString(),data:serializeScene()}:v));setCurrentProjectSlot(slot);setStatusText(`Slot ${slot+1} saved.`);};
   const loadProjectSlot=slot=>{const item=projectSlots[slot];if(!item?.data){setStatusText(`Slot ${slot+1} empty.`);return;}applySnapshot(item.data,`Slot ${slot+1} loaded.`);setCurrentProjectSlot(slot);};
   const clearProjectSlot=slot=>{setProjectSlots(prev=>prev.map((v,i)=>i===slot?null:v));if(currentProjectSlot===slot)setCurrentProjectSlot(null);};
-  const exportProjectJson=()=>{try{const blob=new Blob([JSON.stringify(serializeScene(),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${(projectName||'cesira').replace(/[^a-z0-9-_]+/gi,'-').toLowerCase()}.json`;a.click();window.setTimeout(()=>URL.revokeObjectURL(url),500);setStatusText('Exported.');}catch{setStatusText('Export failed.');}};
+  const exportProjectJson=()=>{try{const blob=new Blob([JSON.stringify(serializeScene(),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${(projectName||'cesira').replace(/[^a-z0-9-_]+/gi,'-').toLowerCase()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),500);setStatusText('Exported.');}catch{setStatusText('Export failed.');}};
   const importProjectFile=async e=>{const f=e.target.files?.[0];if(!f)return;try{const t=await f.text();applySnapshot(JSON.parse(t),'Imported.');}catch{setStatusText('Import failed.');}finally{if(e.target)e.target.value='';}};
-  const startRecording=async()=>{
-    await initAudio();const audio=audioRef.current;if(!audio||recState==='recording')return;
-    const preferred=['audio/webm;codecs=opus','audio/webm','audio/mp4'];const mime=preferred.find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported?.(t))||'';
-    chunksRef.current=[];const recorder=mime?new MediaRecorder(audio.dest.stream,{mimeType:mime}):new MediaRecorder(audio.dest.stream);recorderRef.current=recorder;setRecordMime(mime||'audio/webm');
-    recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunksRef.current.push(e.data);};
-    recorder.onstop=()=>{const ft=mime||recorder.mimeType||'audio/webm';const ext=ft.includes('mp4')?'m4a':'webm';const blob=new Blob(chunksRef.current,{type:ft});const url=URL.createObjectURL(blob);setRecordings(prev=>[{url,name:`cesira-take-${prev.length+1}.${ext}`},...prev.slice(0,5)]);setRecState('idle');setStatusText('Take saved.');};
-    recorder.start();setRecState('recording');setStatusText('Recording...');
-  };
+  const startRecording=async()=>{await initAudio();const audio=audioRef.current;if(!audio||recState==='recording')return;const preferred=['audio/webm;codecs=opus','audio/webm','audio/mp4'];const mime=preferred.find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported?.(t))||'';chunksRef.current=[];const recorder=mime?new MediaRecorder(audio.dest.stream,{mimeType:mime}):new MediaRecorder(audio.dest.stream);recorderRef.current=recorder;setRecordMime(mime||'audio/webm');recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunksRef.current.push(e.data);};recorder.onstop=()=>{const ft=mime||recorder.mimeType||'audio/webm';const ext=ft.includes('mp4')?'m4a':'webm';const blob=new Blob(chunksRef.current,{type:ft});const url=URL.createObjectURL(blob);setRecordings(prev=>[{url,name:`cesira-take-${prev.length+1}.${ext}`},...prev.slice(0,5)]);setRecState('idle');setStatusText('Take saved.');};recorder.start();setRecState('recording');setStatusText('Recording...');};
   const stopRecording=()=>{if(recorderRef.current&&recState==='recording'){recorderRef.current.stop();setRecState('stopping');setStatusText('Finalizing...');}};
   const downloadRecording=item=>{const a=document.createElement('a');a.href=item.url;a.download=item.name;a.click();};
 
-  // ─── Style helpers ────────────────────────────────────────────────────────
-  const pill=(active,color='#34d399')=>({padding:'3px 7px',borderRadius:'5px',border:`1px solid ${active?color:BD}`,background:active?`${color}1a`:B1,color:active?color:'#64748b',fontSize:'8px',fontWeight:800,cursor:'pointer',transition:'all 0.1s',letterSpacing:'0.1em',whiteSpace:'nowrap'});
+  // ─── Styles ────────────────────────────────────────────────────────────────
+  const pill=(active,color='#34d399')=>({padding:'2px 6px',borderRadius:'4px',border:`1px solid ${active?color:BD}`,background:active?`${color}18`:B1,color:active?color:'#64748b',fontSize:'8px',fontWeight:800,cursor:'pointer',transition:'all 0.1s',letterSpacing:'0.1em',whiteSpace:'nowrap'});
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const selStep=selectedStep;
+
+  // ─── Render ─────────────────────────────────────────────────────────────────
   return(
     <div style={{fontFamily:'Inter,ui-sans-serif,system-ui,sans-serif',background:B0,color:'#e2e8f0',height:'100dvh',display:'flex',flexDirection:'column',overflow:'hidden',padding:'6px',gap:'4px',boxSizing:'border-box',userSelect:'none'}}>
 
       {/* TOP BAR */}
       <div style={{display:'flex',alignItems:'center',gap:'5px',flexShrink:0,height:'30px'}}>
-        <div style={{fontSize:'9px',fontWeight:900,letterSpacing:'0.24em',color:'#34d399',padding:'2px 8px',borderRadius:'999px',border:'1px solid rgba(52,211,153,0.25)',background:'rgba(52,211,153,0.07)',whiteSpace:'nowrap'}}>CESIRA V1</div>
-        <input value={projectName} onChange={e=>setProjectName(e.target.value)} style={{width:'110px',background:B1,border:`1px solid ${BD}`,borderRadius:'6px',padding:'2px 7px',fontSize:'10px',fontWeight:700,color:'#fff',outline:'none'}}/>
-        <button onClick={togglePlay} style={{padding:'3px 14px',borderRadius:'6px',border:'none',background:isPlaying?'#f43f5e':'#34d399',color:isPlaying?'#fff':'#0a1628',fontWeight:900,fontSize:'10px',cursor:'pointer',letterSpacing:'0.08em',flexShrink:0,transition:'background 0.15s'}}>{isPlaying?'■ STOP':'▶ PLAY'}</button>
-        {[{l:'Freestyle',fn:randomize},{l:'Auto Jam',fn:autoJam}].map(({l,fn})=><button key={l} onClick={fn} style={{...pill(false),padding:'4px 9px',fontSize:'9px'}}>{l}</button>)}
-        <button onClick={recState==='recording'?stopRecording:startRecording} style={{...pill(recState==='recording','#f43f5e'),padding:'4px 9px',fontSize:'9px'}}>{recState==='recording'?'■ Stop Rec':'⏺ Rec'}</button>
-        <button onClick={clearAll} style={{...pill(false),padding:'4px 9px',fontSize:'9px'}}>Clear</button>
-        <button onClick={saveProjectLocal} style={{...pill(false,'#34d399'),padding:'4px 9px',fontSize:'9px'}}>Save</button>
+        <div style={{fontSize:'9px',fontWeight:900,letterSpacing:'0.22em',color:'#34d399',padding:'2px 8px',borderRadius:'999px',border:'1px solid rgba(52,211,153,0.22)',background:'rgba(52,211,153,0.06)',whiteSpace:'nowrap'}}>CESIRA V1</div>
+        <input value={projectName} onChange={e=>setProjectName(e.target.value)} style={{width:'100px',background:B1,border:`1px solid ${BD}`,borderRadius:'5px',padding:'2px 6px',fontSize:'10px',fontWeight:700,color:'#fff',outline:'none'}}/>
+        <button onClick={togglePlay} style={{padding:'3px 14px',borderRadius:'6px',border:'none',background:isPlaying?'#f43f5e':'#34d399',color:isPlaying?'#fff':'#0a1628',fontWeight:900,fontSize:'10px',cursor:'pointer',letterSpacing:'0.08em',flexShrink:0,transition:'background 0.12s'}}>{isPlaying?'■ STOP':'▶ PLAY'}</button>
+        <button onClick={randomize} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Freestyle</button>
+        <button onClick={autoJam} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Auto Jam</button>
+        <button onClick={recState==='recording'?stopRecording:startRecording} style={{...pill(recState==='recording','#f43f5e'),padding:'3px 8px',fontSize:'9px'}}>{recState==='recording'?'■ Rec':'⏺ Rec'}</button>
+        <button onClick={undo} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>↩</button>
+        <button onClick={redo} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>↪</button>
+        <button onClick={clearAll} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>Clr</button>
+        <button onClick={saveProjectLocal} style={{...pill(false,'#34d399'),padding:'3px 6px',fontSize:'9px'}}>Save</button>
+        {/* Oscilloscope */}
+        <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',minWidth:0}}>
+          <Scope analyser={scopeAnalyser} color='#34d399' width={180} height={24}/>
+        </div>
         {/* BPM + Tap */}
-        <div style={{display:'flex',alignItems:'center',gap:'3px',marginLeft:'auto'}}>
-          <span style={{fontSize:'8px',fontWeight:700,color:'#475569',letterSpacing:'0.14em'}}>BPM</span>
-          <input type="number" min={60} max={200} value={bpm} onChange={e=>setBpm(clamp(Number(e.target.value),60,200))} style={{width:'42px',background:B1,border:`1px solid ${BD}`,borderRadius:'5px',padding:'2px 4px',fontSize:'11px',fontWeight:900,color:'#34d399',textAlign:'center',outline:'none'}}/>
-          <button onClick={tapTempo} style={{...pill(false,'#fbbf24'),padding:'3px 7px',fontSize:'8px'}}>TAP</button>
+        <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
+          <span style={{fontSize:'7px',fontWeight:800,color:'#334155',letterSpacing:'0.16em'}}>BPM</span>
+          <input type="number" min={60} max={200} value={bpm} onChange={e=>setBpm(clamp(Number(e.target.value),60,200))} style={{width:'40px',background:B1,border:`1px solid ${BD}`,borderRadius:'4px',padding:'2px 3px',fontSize:'11px',fontWeight:900,color:'#34d399',textAlign:'center',outline:'none'}}/>
+          <button onClick={tapTempo} style={{...pill(tapTimes.length>0,'#fbbf24'),padding:'3px 5px',fontSize:'8px'}}>TAP</button>
         </div>
         {/* Steps */}
         <div style={{display:'flex',gap:'2px'}}>
           {[16,32,48,64].map(s=><button key={s} onClick={()=>handleStepCount(s)} style={pill(stepCount===s)}>{s}</button>)}
         </div>
-        <div style={{fontSize:'9px',color:'#334155',fontWeight:700,whiteSpace:'nowrap',minWidth:'42px',textAlign:'right'}}>{step+1}/{stepCount}</div>
-        {/* Status */}
-        <div style={{fontSize:'8px',color:'#34d399',opacity:0.65,maxWidth:'100px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{statusText}</div>
+        <div style={{fontSize:'8px',color:'#334155',fontWeight:800,whiteSpace:'nowrap',minWidth:'36px',textAlign:'right'}}>{step+1}/{stepCount}</div>
+        <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
+          <div style={{width:'6px',height:'6px',borderRadius:'50%',background:midiEnabled?'#34d399':'#334155',transition:'background 0.3s'}}/>
+          <span style={{fontSize:'7px',color:'#334155',fontWeight:700}}>MIDI</span>
+        </div>
+        <div style={{fontSize:'7px',color:'#34d399',opacity:0.55,maxWidth:'80px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{statusText}</div>
       </div>
 
       {/* PRESET STRIPS */}
       <div style={{display:'flex',flexDirection:'column',gap:'2px',flexShrink:0}}>
         {[
-          {label:'DRUMS',items:drumPresets,active:drumPreset,onSelect:setDrumPreset,onPreview:i=>playDrumAt(i,0.9,audioRef.current?.ctx.currentTime+0.01||0)},
-          {label:'BASS', items:bassPresets, active:bassPreset, onSelect:setBassPreset, onPreview:i=>playBassAt(i,bassNotes[i%bassNotes.length],0.9,(audioRef.current?.ctx.currentTime||0)+0.01)},
-          {label:'SYNTH',items:synthPresets,active:synthPreset,onSelect:setSynthPreset,onPreview:i=>playSynthAt(i,synthNotes[i%synthNotes.length],0.9,(audioRef.current?.ctx.currentTime||0)+0.01)},
-          {label:'FX',   items:fxScenes,   active:fxPreset,   onSelect:i=>applyFxScene(i),onPreview:i=>applyFxScene(i)},
-        ].map(({label,items,active,onSelect,onPreview})=>(
-          <div key={label} style={{display:'flex',alignItems:'center',gap:'5px',height:'19px'}}>
-            <span style={{fontSize:'7px',fontWeight:900,letterSpacing:'0.2em',color:'#2d3748',width:'33px',flexShrink:0,textTransform:'uppercase'}}>{label}</span>
-            <div style={{flex:1,display:'flex',gap:'2px',overflowX:'auto',height:'100%',paddingBottom:'1px'}}>
+          {label:'DRUMS',items:drumPresets,active:drumPreset,onSelect:i=>{setDrumPreset(i);initAudio().then(()=>playDrumAt(i,0.85,(audioRef.current?.ctx.currentTime||0)+0.01));}},
+          {label:'BASS', items:bassPresets, active:bassPreset, onSelect:i=>{setBassPreset(i);initAudio().then(()=>playBassAt(i,bassNotes[i%bassNotes.length],0.85,(audioRef.current?.ctx.currentTime||0)+0.01));}},
+          {label:'SYNTH',items:synthPresets,active:synthPreset,onSelect:i=>{setSynthPreset(i);initAudio().then(()=>playSynthAt(i,synthNotes[i%synthNotes.length],0.85,(audioRef.current?.ctx.currentTime||0)+0.01));}},
+          {label:'FX',   items:fxScenes,   active:fxPreset,   onSelect:i=>applyFxScene(i)},
+        ].map(({label,items,active,onSelect})=>(
+          <div key={label} style={{display:'flex',alignItems:'center',gap:'4px',height:'18px'}}>
+            <span style={{fontSize:'7px',fontWeight:900,letterSpacing:'0.2em',color:'#1e2d3d',width:'32px',flexShrink:0,textTransform:'uppercase'}}>{label}</span>
+            <div style={{flex:1,display:'flex',gap:'2px',overflowX:'auto',height:'100%'}}>
               {items.map((item,idx)=>(
-                <button key={item.name} onClick={()=>{onSelect(idx);if(audioRef.current)initAudio().then(()=>onPreview(idx));}} onDoubleClick={()=>{if(audioRef.current)onPreview(idx);}}
-                  style={{flexShrink:0,padding:'1px 6px',borderRadius:'4px',border:`1px solid ${active===idx?'#34d399':BD}`,background:active===idx?'rgba(52,211,153,0.16)':B1,color:active===idx?'#34d399':'#475569',fontSize:'8px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',height:'100%',display:'flex',alignItems:'center',transition:'all 0.08s'}}>
+                <button key={item.name} onClick={()=>onSelect(idx)}
+                  style={{flexShrink:0,padding:'1px 6px',borderRadius:'3px',border:`1px solid ${active===idx?'#34d399':BD}`,background:active===idx?'rgba(52,211,153,0.14)':B1,color:active===idx?'#34d399':'#3d5166',fontSize:'7.5px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',height:'100%',display:'flex',alignItems:'center',transition:'all 0.07s'}}>
                   {item.name}
                 </button>
               ))}
@@ -700,17 +752,17 @@ export default function CesiraV1(){
         {/* LEFT GRID */}
         <div style={{flex:'1 1 0',display:'flex',flexDirection:'column',gap:'3px',background:B1,borderRadius:'10px',border:`1px solid ${BD}`,padding:'6px',minWidth:0,overflow:'hidden'}}>
           {/* Grid header */}
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,height:'17px'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,height:'16px'}}>
             <div style={{display:'flex',gap:'4px',alignItems:'center'}}>
-              <span style={{fontSize:'8px',fontWeight:800,color:'#34d399',letterSpacing:'0.06em'}}>{grooveProfile.toUpperCase()}</span>
-              <span style={{fontSize:'8px',color:'#1e293b'}}>·</span>
-              <span style={{fontSize:'8px',fontWeight:800,color:'#67e8f9',letterSpacing:'0.06em'}}>{harmonicProfile.toUpperCase()}</span>
-              <span style={{fontSize:'8px',color:'#1e293b'}}>·</span>
-              <span style={{fontSize:'8px',fontWeight:600,color:'#fbbf24',letterSpacing:'0.04em'}}>{sectionProfile}</span>
+              <span style={{fontSize:'8px',fontWeight:800,color:'#34d399'}}>{grooveProfile.toUpperCase()}</span>
+              <span style={{color:'#1e293b',fontSize:'8px'}}>·</span>
+              <span style={{fontSize:'8px',fontWeight:800,color:'#67e8f9'}}>{harmonicProfile.toUpperCase()}</span>
+              <span style={{color:'#1e293b',fontSize:'8px'}}>·</span>
+              <span style={{fontSize:'7px',fontWeight:600,color:'#fbbf24'}}>{sectionProfile}</span>
             </div>
             <div style={{display:'flex',gap:'2px',alignItems:'center'}}>
               <button onClick={()=>setPage(p=>clamp(p-1,0,totalPages-1))} disabled={page===0} style={{...pill(false),padding:'1px 5px',opacity:page===0?0.3:1}}>‹</button>
-              <span style={{fontSize:'8px',color:'#334155',fontWeight:700}}>pg {page+1}/{totalPages}</span>
+              <span style={{fontSize:'7px',color:'#334155',fontWeight:700}}>pg {page+1}/{totalPages} · steps {visibleStart+1}-{visibleEnd}</span>
               <button onClick={()=>setPage(p=>clamp(p+1,0,totalPages-1))} disabled={page>=totalPages-1} style={{...pill(false),padding:'1px 5px',opacity:page>=totalPages-1?0.3:1}}>›</button>
             </div>
           </div>
@@ -718,57 +770,56 @@ export default function CesiraV1(){
           {/* Lane rows */}
           <div style={{flex:1,display:'flex',flexDirection:'column',gap:'2px',minHeight:0}}>
             {laneLabels.map(({key,label,long})=>{
-              const lc=LANE_COLOR[key];
-              const isActive=activeLane===key;
-              const vuLevel=laneVU[key]||0;
-              const flashAge=Date.now()-(padFlash[key]||0);
-              const flashAlpha=Math.max(0,1-flashAge/180);
+              const lc=LANE_COLOR[key];const isActive=activeLane===key;
+              const vuLevel=laneVU[key]||0;const fa=Math.max(0,1-(Date.now()-(padFlash[key]||0))/160);
+              const laneH={kick:1.4,snare:1.1,hat:0.75,bass:1.2,synth:1.1}[key];
               return(
-                <div key={key} style={{flex:1,display:'flex',gap:'3px',alignItems:'stretch',minHeight:0}}>
-                  {/* Lane controls */}
-                  <div style={{width:'88px',flexShrink:0,display:'flex',flexDirection:'column',gap:'2px',justifyContent:'center'}}>
-                    <div style={{display:'flex',gap:'3px',alignItems:'center'}}>
-                      {/* VU meter */}
-                      <VU level={vuLevel} color={lc} width={5} height={22}/>
-                      <div style={{flex:1,display:'flex',flexDirection:'column',gap:'1px'}}>
-                        <button onClick={()=>triggerLaneNow(key,1)}
-                          style={{width:'100%',padding:'2px 0',borderRadius:'5px',border:`1px solid ${isActive?lc:BD}`,background:isActive?`${lc}20`:`${lc}${Math.round(flashAlpha*30).toString(16).padStart(2,'0')}0d`,color:isActive?lc:'#64748b',fontSize:'9px',fontWeight:900,cursor:'pointer',transition:'border-color 0.1s,background 0.05s',boxShadow:flashAlpha>0.1?`0 0 ${Math.round(flashAlpha*10)}px ${lc}55`:'none'}}>
+                <div key={key} style={{flex:laneH,display:'flex',gap:'3px',alignItems:'stretch',minHeight:0}}>
+                  {/* Lane sidebar */}
+                  <div style={{width:'90px',flexShrink:0,display:'flex',gap:'3px',alignItems:'center'}}>
+                    <VU level={vuLevel} color={lc} width={4} height={26}/>
+                    <div style={{flex:1,display:'flex',flexDirection:'column',gap:'1.5px'}}>
+                      <div style={{display:'flex',gap:'2px',alignItems:'center'}}>
+                        <button onClick={()=>setActiveLane(key)} onMouseDown={e=>onPadDown(key,e)} onMouseUp={e=>onPadUp(key,e)}
+                          style={{flex:1,padding:'2px 0',borderRadius:'4px',border:`1px solid ${isActive?lc:BD}`,background:isActive?`${lc}1a`:fa>0.05?`${lc}${Math.round(fa*24).toString(16).padStart(2,'0')}`:B1,color:isActive?lc:'#475569',fontSize:'9px',fontWeight:900,cursor:'pointer',transition:'border-color 0.08s',boxShadow:fa>0.1?`0 0 ${Math.round(fa*8)}px ${lc}55`:'none'}}>
                           {label}
                         </button>
-                        <div style={{fontSize:'7px',color:'#334155',textAlign:'center',letterSpacing:'0.1em'}}>{long}</div>
+                        <span style={{fontSize:'6.5px',color:'#2d3d4d',letterSpacing:'0.08em',fontWeight:600}}>{long[0]+long.slice(1).toLowerCase()}</span>
                       </div>
-                    </div>
-                    {/* Lane step count */}
-                    <div style={{display:'flex',gap:'1px'}}>
-                      {[16,32,48,64].map(s=>(
-                        <button key={s} onClick={()=>setLaneStepCount(key,s)}
-                          style={{flex:1,padding:'1px 0',borderRadius:'3px',border:`1px solid ${laneStepCounts[key]===s?lc:BD}`,background:laneStepCounts[key]===s?`${lc}25`:B1,color:laneStepCounts[key]===s?lc:'#334155',fontSize:'6px',fontWeight:800,cursor:'pointer'}}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                    {/* Volume slider */}
-                    <div style={{display:'flex',alignItems:'center',gap:'2px'}}>
-                      <span style={{fontSize:'6px',color:'#334155',fontWeight:700,width:'8px'}}>V</span>
-                      <input type="range" min={0} max={1} step={0.01} value={laneVolumes[key]} onChange={e=>setLaneVolumes(prev=>({...prev,[key]:Number(e.target.value)}))}
-                        style={{flex:1,height:'3px',accentColor:lc,cursor:'pointer'}}/>
-                      <span style={{fontSize:'6px',color:lc,fontWeight:800,width:'20px',textAlign:'right'}}>{Math.round(laneVolumes[key]*100)}</span>
+                      <div style={{display:'flex',gap:'1px'}}>
+                        {[16,32,48,64].map(s=>(
+                          <button key={s} onClick={()=>setLaneStepCount(key,s)}
+                            style={{flex:1,padding:'0',height:'10px',borderRadius:'2px',border:`1px solid ${laneStepCounts[key]===s?lc:BD}`,background:laneStepCounts[key]===s?`${lc}22`:B1,color:laneStepCounts[key]===s?lc:'#283848',fontSize:'5.5px',fontWeight:800,cursor:'pointer'}}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:'2px'}}>
+                        <span style={{fontSize:'5px',color:'#283848',fontWeight:700}}>V</span>
+                        <input type="range" min={0} max={1} step={0.01} value={laneVolumes[key]} onChange={e=>setLaneVolumes(prev=>({...prev,[key]:Number(e.target.value)}))}
+                          style={{flex:1,height:'2px',accentColor:lc,cursor:'pointer'}}/>
+                        <span style={{fontSize:'5.5px',color:lc,fontWeight:800,width:'18px',textAlign:'right'}}>{Math.round(laneVolumes[key]*100)}</span>
+                      </div>
                     </div>
                   </div>
 
                   {/* Step grid */}
                   <div style={{flex:1,display:'grid',gridTemplateColumns:`repeat(${visibleIndices.length},1fr)`,gap:'1.5px',alignItems:'stretch'}}>
                     {visibleIndices.map(idx=>{
-                      const on=patterns[key][idx],isActiveStep=step===idx&&isPlaying,disabled=idx>=laneStepCounts[key],isBar=idx%4===0,isBeat=idx%16===0;
+                      const sd=patterns[key][idx];const on=sd.on,isActiveStep=step===idx&&isPlaying,disabled=idx>=laneStepCounts[key];
+                      const isBeat=idx%16===0,isBar=idx%4===0;
+                      const isSel=selStep?.lane===key&&selStep?.idx===idx;
+                      const probAlpha=on?Math.round(clamp((sd.prob??1)*255,60,255)).toString(16).padStart(2,'0'):'';
                       return(
-                        <button key={`${key}-${idx}`} onClick={()=>toggleCell(key,idx)}
+                        <button key={`${key}-${idx}`}
+                          onClick={()=>{if(disabled)return;if(isSel){setSelectedStep(null);}else{toggleCell(key,idx);setSelectedStep(on?null:{lane:key,idx});setActiveLane(key);}}}
                           style={{
-                            width:'100%',borderRadius:'3px',
-                            border:`1px solid ${isActiveStep?lc:isBeat?'rgba(255,255,255,0.16)':isBar?'rgba(255,255,255,0.09)':'rgba(255,255,255,0.04)'}`,
-                            background:isActiveStep?`${lc}70`:on?lc:disabled?'rgba(255,255,255,0.005)':'rgba(255,255,255,0.03)',
-                            opacity:disabled?0.12:1,cursor:disabled?'not-allowed':'pointer',
+                            width:'100%',borderRadius:'3px',position:'relative',
+                            border:`1px solid ${isActiveStep?lc:isSel?lc:isBeat?'rgba(255,255,255,0.14)':isBar?'rgba(255,255,255,0.07)':'rgba(255,255,255,0.035)'}`,
+                            background:isActiveStep?`${lc}75`:on?`${lc}${probAlpha}`:disabled?'rgba(255,255,255,0.005)':'rgba(255,255,255,0.025)',
+                            opacity:disabled?0.1:1,cursor:disabled?'not-allowed':'pointer',
+                            boxShadow:isActiveStep?`0 0 10px ${lc}90`:on?`0 0 3px ${lc}28`:'none',
                             transition:'background 0.04s',
-                            boxShadow:isActiveStep?`0 0 10px ${lc}88`:on?`0 0 3px ${lc}30`:'none',
                           }}/>
                       );
                     })}
@@ -778,29 +829,41 @@ export default function CesiraV1(){
             })}
           </div>
 
+          {/* Step detail editor (shows when step selected) */}
+          {selStep&&patterns[selStep.lane]&&patterns[selStep.lane][selStep.idx]&&(()=>{
+            const sd=patterns[selStep.lane][selStep.idx];const lc=LANE_COLOR[selStep.lane];
+            return(
+              <div style={{flexShrink:0,display:'flex',gap:'8px',alignItems:'center',padding:'4px 6px',borderRadius:'6px',border:`1px solid ${lc}30`,background:`${lc}08`}}>
+                <span style={{fontSize:'8px',fontWeight:800,color:lc}}>{selStep.lane.toUpperCase()} step {selStep.idx+1}</span>
+                <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'4px'}}>
+                  <Slider label="Probability" value={sd.prob??1} setValue={v=>setStepProp(selStep.lane,selStep.idx,'prob',v)} fmt={v=>`${Math.round(v*100)}%`} color={lc}/>
+                  <Slider label="Velocity" value={sd.vel??1} setValue={v=>setStepProp(selStep.lane,selStep.idx,'vel',v)} fmt={v=>`${Math.round(v*100)}`} color={lc}/>
+                  <Slider label="Length" value={sd.len??1} setValue={v=>setStepProp(selStep.lane,selStep.idx,'len',v)} min={0.1} max={4} step={0.1} fmt={v=>`${v.toFixed(1)}x`} color={lc}/>
+                </div>
+                <button onClick={()=>setSelectedStep(null)} style={{...pill(false),padding:'2px 5px',fontSize:'8px'}}>✕</button>
+              </div>
+            );
+          })()}
+
           {/* Pad row */}
-          <div style={{display:'flex',gap:'3px',flexShrink:0,height:'28px'}}>
-            {laneLabels.map(({key,long})=>{
-              const lc=LANE_COLOR[key];const flashAge=Date.now()-(padFlash[key]||0);const flashAlpha=Math.max(0,1-flashAge/180);
-              return(
-                <button key={key} onMouseDown={()=>triggerLaneNow(key,1)}
-                  style={{flex:1,padding:'0',borderRadius:'6px',border:`1px solid ${lc}40`,background:flashAlpha>0.1?`${lc}${Math.round(flashAlpha*40).toString(16).padStart(2,'0')}`:(`${lc}0e`),color:lc,fontSize:'8px',fontWeight:900,cursor:'pointer',letterSpacing:'0.06em',transition:'background 0.04s',boxShadow:flashAlpha>0.2?`0 0 ${Math.round(flashAlpha*8)}px ${lc}60`:'none'}}>
-                  {long}
-                </button>
-              );
-            })}
-            <button onClick={triggerStutter} style={{flex:1,padding:'0',borderRadius:'6px',border:`1px solid ${BD}`,background:B1,color:'#64748b',fontSize:'8px',fontWeight:800,cursor:'pointer'}}>Stutter</button>
-            <button onClick={()=>setStutterOn(v=>!v)} style={{flex:1,padding:'0',borderRadius:'6px',border:`1px solid ${stutterOn?'#34d399':BD}`,background:stutterOn?'rgba(52,211,153,0.1)':B1,color:stutterOn?'#34d399':'#475569',fontSize:'8px',fontWeight:800,cursor:'pointer'}}>Arm {stutterBurst}x</button>
+          <div style={{display:'flex',gap:'3px',flexShrink:0,height:'26px'}}>
+            {laneLabels.map(({key,long})=>{const lc=LANE_COLOR[key];const fa=Math.max(0,1-(Date.now()-(padFlash[key]||0))/150);return(
+              <button key={key} onMouseDown={e=>onPadDown(key,e)} onMouseUp={e=>onPadUp(key,e)}
+                style={{flex:1,borderRadius:'5px',border:`1px solid ${lc}38`,background:fa>0.1?`${lc}${Math.round(fa*36).toString(16).padStart(2,'0')}`:(`${lc}0c`),color:lc,fontSize:'7.5px',fontWeight:900,cursor:'pointer',letterSpacing:'0.06em',transition:'background 0.04s',boxShadow:fa>0.2?`0 0 ${Math.round(fa*7)}px ${lc}55`:'none'}}>
+                {long}
+              </button>
+            );})}
+            <button onClick={triggerStutter} style={{flex:1,borderRadius:'5px',border:`1px solid ${BD}`,background:B1,color:'#475569',fontSize:'7.5px',fontWeight:800,cursor:'pointer'}}>Stutter</button>
+            <button onClick={()=>setStutterOn(v=>!v)} style={{flex:1,borderRadius:'5px',border:`1px solid ${stutterOn?'#34d399':BD}`,background:stutterOn?'rgba(52,211,153,0.1)':B1,color:stutterOn?'#34d399':'#3d5166',fontSize:'7.5px',fontWeight:800,cursor:'pointer'}}>Arm {stutterBurst}x</button>
           </div>
         </div>
 
         {/* RIGHT PANEL */}
-        <div style={{width:'258px',flexShrink:0,display:'flex',flexDirection:'column',background:B1,borderRadius:'10px',border:`1px solid ${BD}`,overflow:'hidden'}}>
-          {/* Tabs */}
+        <div style={{width:'256px',flexShrink:0,display:'flex',flexDirection:'column',background:B1,borderRadius:'10px',border:`1px solid ${BD}`,overflow:'hidden'}}>
           <div style={{display:'flex',borderBottom:`1px solid ${BD}`,flexShrink:0}}>
             {[{id:'knobs',label:'Knobs'},{id:'lane',label:'Lane FX'},{id:'notes',label:'Notes'},{id:'save',label:'Save'}].map(({id,label})=>(
               <button key={id} onClick={()=>setRightTab(id)}
-                style={{flex:1,padding:'5px 0',fontSize:'8px',fontWeight:900,letterSpacing:'0.12em',border:'none',background:rightTab===id?'rgba(52,211,153,0.07)':'transparent',color:rightTab===id?'#34d399':'#334155',cursor:'pointer',borderBottom:rightTab===id?'2px solid #34d399':'2px solid transparent',textTransform:'uppercase',transition:'color 0.1s'}}>
+                style={{flex:1,padding:'5px 0',fontSize:'7.5px',fontWeight:900,letterSpacing:'0.12em',border:'none',background:rightTab===id?'rgba(52,211,153,0.07)':'transparent',color:rightTab===id?'#34d399':'#2d3d4d',cursor:'pointer',borderBottom:rightTab===id?'2px solid #34d399':'2px solid transparent',textTransform:'uppercase',transition:'color 0.1s'}}>
                 {label}
               </button>
             ))}
@@ -809,20 +872,18 @@ export default function CesiraV1(){
           <div style={{flex:1,overflowY:'auto',padding:'7px',display:'flex',flexDirection:'column',gap:'5px'}}>
 
             {rightTab==='knobs'&&<>
-              {/* Circular knobs grid */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'4px',justifyItems:'center'}}>
-                <Knob label="Swing" value={swing} setValue={setSwing} min={0} max={0.25} size={36}/>
-                <Knob label="Density" value={density} setValue={setDensity} size={36}/>
-                <Knob label="Chaos" value={chaos} setValue={setChaos} size={36} color='#f43f5e'/>
-                <Knob label="Humanize" value={humanize} setValue={setHumanize} min={0} max={0.3} size={36}/>
-                <Knob label="Macro" value={macroKnob} setValue={setMacroKnob} size={36} color='#a78bfa'/>
-                <Knob label="Groove" value={grooveAmount} setValue={setGrooveAmount} size={36}/>
-                <Knob label="Master" value={master} setValue={setMaster} min={0.1} size={36} color='#fbbf24'/>
-                <Knob label="Tone" value={tone} setValue={setTone} min={0.1} size={36} color='#22d3ee'/>
-                <Knob label="Noise" value={noise} setValue={setNoise} size={36}/>
-                <Knob label="Space" value={space} setValue={setSpace} size={36} color='#22d3ee'/>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'3px',justifyItems:'center'}}>
+                <Knob label="Swing" value={swing} setValue={setSwing} min={0} max={0.25} size={34}/>
+                <Knob label="Density" value={density} setValue={setDensity} size={34}/>
+                <Knob label="Chaos" value={chaos} setValue={setChaos} size={34} color='#f43f5e'/>
+                <Knob label="Humanize" value={humanize} setValue={setHumanize} min={0} max={0.3} size={34}/>
+                <Knob label="Macro" value={macroKnob} setValue={setMacroKnob} size={34} color='#a78bfa'/>
+                <Knob label="Groove" value={grooveAmount} setValue={setGrooveAmount} size={34}/>
+                <Knob label="Master" value={master} setValue={setMaster} min={0.1} size={34} color='#fbbf24'/>
+                <Knob label="Tone" value={tone} setValue={setTone} min={0.1} size={34} color='#22d3ee'/>
+                <Knob label="Noise" value={noise} setValue={setNoise} size={34}/>
+                <Knob label="Space" value={space} setValue={setSpace} size={34} color='#22d3ee'/>
               </div>
-              {/* Sliders for detailed params */}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 8px'}}>
                 {[
                   ['Compress',compressAmount,setCompressAmount,0,1],['Resonance',resonance,setResonance,0,1],
@@ -830,19 +891,18 @@ export default function CesiraV1(){
                   ['Drum Decay',drumDecay,setDrumDecay,0.1,1],['Bass Cutoff',bassCutoff,setBassCutoff,0,1],
                   ['Synth Cutoff',synthCutoff,setSynthCutoff,0,1],['Bass Sub',bassSubAmount,setBassSubAmount,0.1,1],
                   ['Synth Atk',synthAttack,setSynthAttack,0,1],['Synth Rel',synthRelease,setSynthRelease,0,1],
-                ].map(([label,v,s,min,max])=><Slider key={label} label={label} value={v} setValue={s} min={min} max={max}/>)}
+                  ['FM Index',fmIndex,setFmIndex,0,3],['Stutter',stutterBurst,setStutterBurst,2,8],
+                ].map(([l,v,s,mn,mx])=><Slider key={l} label={l} value={v} setValue={s} min={mn??0} max={mx??1} step={l==='Stutter'?1:0.01} fmt={l==='Stutter'?v=>`${v}x`:undefined}/>)}
               </div>
-              <Slider label="Stutter Burst" value={stutterBurst} setValue={setStutterBurst} min={2} max={8} step={1} fmt={v=>`${v}x`}/>
               <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
                 <button onClick={()=>setMetronomeOn(v=>!v)} style={pill(metronomeOn)}>Metro</button>
                 <input type="range" min={0} max={1} step={0.01} value={metronomeLevel} onChange={e=>setMetronomeLevel(Number(e.target.value))} style={{flex:1,height:'2px',accentColor:'#34d399'}}/>
-                <span style={{fontSize:'8px',color:'#475569',fontWeight:700}}>{Math.round(metronomeLevel*100)}</span>
               </div>
               {/* Wave selectors */}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px'}}>
                 {[{label:'BASS WAVE',wave:bassWave,set:setBassWave,color:'#22d3ee'},{label:'SYNTH WAVE',wave:synthWave,set:setSynthWave,color:'#a78bfa'}].map(({label,wave,set,color})=>(
                   <div key={label}>
-                    <div style={{fontSize:'7px',color:'#334155',fontWeight:800,letterSpacing:'0.14em',marginBottom:'3px',textTransform:'uppercase'}}>{label}</div>
+                    <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',marginBottom:'2px',textTransform:'uppercase'}}>{label}</div>
                     <div style={{display:'flex',flexWrap:'wrap',gap:'2px'}}>
                       {['auto','sine','tri','sq','saw'].map((w,i)=>{const full=['auto','sine','triangle','square','sawtooth'][i];return<button key={w} onClick={()=>set(full)} style={pill(wave===full,color)}>{w}</button>;})}
                     </div>
@@ -851,18 +911,24 @@ export default function CesiraV1(){
               </div>
               {/* Scenes */}
               <div>
-                <div style={{fontSize:'7px',color:'#334155',fontWeight:800,letterSpacing:'0.14em',marginBottom:'3px',textTransform:'uppercase'}}>SCENES</div>
+                <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',marginBottom:'3px',textTransform:'uppercase'}}>SCENES</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px'}}>
                   {[0,1,2,3].map(slot=>(
-                    <div key={slot} style={{borderRadius:'5px',border:`1px solid ${currentScene===slot?'rgba(52,211,153,0.35)':sceneSlots[slot]?'rgba(34,211,238,0.18)':BD}`,background:'rgba(255,255,255,0.015)',padding:'3px 5px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'3px'}}>
-                      <span style={{fontSize:'8px',fontWeight:800,color:currentScene===slot?'#34d399':'#334155'}}>S{slot+1}{sceneSlots[slot]?' ●':''}  </span>
+                    <div key={slot} style={{borderRadius:'4px',border:`1px solid ${currentScene===slot?'rgba(52,211,153,0.32)':sceneSlots[slot]?'rgba(34,211,238,0.16)':BD}`,background:'rgba(255,255,255,0.015)',padding:'3px 5px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'2px'}}>
+                      <span style={{fontSize:'7px',fontWeight:800,color:currentScene===slot?'#34d399':'#2d3d4d'}}>S{slot+1}{sceneSlots[slot]?' ◆':''}</span>
                       <div style={{display:'flex',gap:'2px'}}>
-                        <button onClick={()=>loadScene(slot)} disabled={!sceneSlots[slot]} style={{...pill(false),opacity:sceneSlots[slot]?1:0.3,padding:'1px 5px'}}>Load</button>
-                        <button onClick={()=>saveScene(slot)} style={{...pill(false,'#34d399'),padding:'1px 5px'}}>Save</button>
+                        <button onClick={()=>loadScene(slot)} disabled={!sceneSlots[slot]} style={{...pill(false),opacity:sceneSlots[slot]?1:0.28,padding:'1px 4px'}}>Load</button>
+                        <button onClick={()=>saveScene(slot)} style={{...pill(false,'#34d399'),padding:'1px 4px'}}>Save</button>
                       </div>
                     </div>
                   ))}
                 </div>
+              </div>
+              {/* Keyboard shortcuts hint */}
+              <div style={{fontSize:'6.5px',color:'#1e2d3d',lineHeight:1.6,padding:'4px 6px',borderRadius:'4px',background:'rgba(255,255,255,0.015)',border:`1px solid ${BD}`}}>
+                <span style={{color:'#2d4d5d',fontWeight:800}}>SHORTCUTS</span><br/>
+                Space = Play/Stop · R = Freestyle · T = Tap<br/>
+                1-5 = Trigger lane · ⌘Z / ⌘⇧Z = Undo/Redo
               </div>
             </>}
 
@@ -870,21 +936,19 @@ export default function CesiraV1(){
               <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
                 {laneLabels.map(({key,long})=>{const lc=LANE_COLOR[key];return<button key={key} onClick={()=>setActiveLane(key)} style={pill(activeLane===key,lc)}>{long}</button>;})}
               </div>
-              <div style={{display:'flex',gap:'4px',alignItems:'center',padding:'4px 0'}}>
-                <VU level={laneVU[activeLane]||0} color={LANE_COLOR[activeLane]} width={8} height={40}/>
+              <div style={{display:'flex',gap:'4px',alignItems:'center'}}>
+                <VU level={laneVU[activeLane]||0} color={LANE_COLOR[activeLane]} width={7} height={38}/>
                 <div style={{flex:1,display:'flex',flexDirection:'column',gap:'4px'}}>
+                  <Slider label="Volume" value={laneVolumes[activeLane]} setValue={v=>setLaneVolumes(prev=>({...prev,[activeLane]:v}))} fmt={v=>`${Math.round(v*100)}`} color={LANE_COLOR[activeLane]}/>
                   {['drive','tone','echo','crush','pan'].map(param=>(
-                    <Slider key={param} label={`${param}`} value={laneFx[activeLane]?.[param]??0}
-                      setValue={v=>setLaneFx(prev=>({...prev,[activeLane]:{...prev[activeLane],[param]:v}}))} min={param==='pan'?-1:0} max={1}/>
+                    <Slider key={param} label={param} value={laneFx[activeLane]?.[param]??0}
+                      setValue={v=>setLaneFx(prev=>({...prev,[activeLane]:{...prev[activeLane],[param]:v}}))} min={param==='pan'?-1:0} max={1} color={LANE_COLOR[activeLane]}/>
                   ))}
                 </div>
               </div>
-              {/* Lane volume in Lane FX tab too */}
-              <Slider label={`${activeLane} volume`} value={laneVolumes[activeLane]} setValue={v=>setLaneVolumes(prev=>({...prev,[activeLane]:v}))} min={0} max={1}/>
-              {/* Ops */}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px'}}>
                 {[['Rotate →',()=>rotateLane(activeLane,1)],['Rotate ←',()=>rotateLane(activeLane,-1)],['Mutate',()=>mutateLane(activeLane)],['Fill',()=>fillLane(activeLane,clamp(density+0.12,0.15,0.95))]].map(([l,fn])=>(
-                  <button key={l} onClick={fn} style={{...pill(false),padding:'4px',textAlign:'center',fontSize:'8px'}}>{l}</button>
+                  <button key={l} onClick={fn} style={{...pill(false),padding:'4px',textAlign:'center'}}>{l}</button>
                 ))}
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'2px'}}>
@@ -898,13 +962,13 @@ export default function CesiraV1(){
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(8,1fr)',gap:'2px'}}>
                 {visibleIndices.map(idx=>{
-                  const laneOn=noteEditLane==='bass'?(idx<laneStepCounts.bass&&patterns.bass[idx]):(idx<laneStepCounts.synth&&patterns.synth[idx]);
-                  const currentNote=noteEditLane==='bass'?bassLine[idx]:synthLine[idx];const pool=getLaneNotePool(noteEditLane);
+                  const laneOn=noteEditLane==='bass'?(idx<laneStepCounts.bass&&patterns.bass[idx].on):(idx<laneStepCounts.synth&&patterns.synth[idx].on);
+                  const currentNote=noteEditLane==='bass'?bassLine[idx]:synthLine[idx];const pool=getLaneNotePool(noteEditLane);const lc=LANE_COLOR[noteEditLane];
                   return(
-                    <div key={idx} style={{borderRadius:'4px',background:laneOn?'rgba(255,255,255,0.05)':'rgba(255,255,255,0.01)',padding:'2px',opacity:laneOn?1:0.2,textAlign:'center'}}>
-                      <div style={{fontSize:'6px',color:'#334155',marginBottom:'1px'}}>{idx+1}</div>
+                    <div key={idx} style={{borderRadius:'4px',background:laneOn?'rgba(255,255,255,0.05)':'rgba(255,255,255,0.01)',padding:'2px',opacity:laneOn?1:0.18,textAlign:'center'}}>
+                      <div style={{fontSize:'5.5px',color:'#283848',marginBottom:'1px'}}>{idx+1}</div>
                       <button disabled={!laneOn} onClick={()=>{if(!pool.length)return;const next=pool[(pool.indexOf(currentNote)+1)%pool.length];setStepNote(noteEditLane,idx,next);}}
-                        style={{width:'100%',padding:'2px 0',borderRadius:'3px',border:'none',background:laneOn?LANE_COLOR[noteEditLane]:'rgba(255,255,255,0.04)',color:laneOn?'#0a1628':'#334155',fontSize:'7px',fontWeight:800,cursor:laneOn?'pointer':'default'}}>
+                        style={{width:'100%',padding:'2px 0',borderRadius:'3px',border:'none',background:laneOn?lc:'rgba(255,255,255,0.04)',color:laneOn?'#0a1628':'#334155',fontSize:'6.5px',fontWeight:800,cursor:laneOn?'pointer':'default'}}>
                         {currentNote}
                       </button>
                     </div>
@@ -913,51 +977,53 @@ export default function CesiraV1(){
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'2px'}}>
                 {[['↓ Down',()=>shiftLaneNotes(noteEditLane,-1)],['Random',()=>randomizeLaneNotes(noteEditLane)],['↑ Up',()=>shiftLaneNotes(noteEditLane,1)]].map(([l,fn])=>(
-                  <button key={l} onClick={fn} style={{...pill(false),padding:'4px',textAlign:'center',fontSize:'8px'}}>{l}</button>
+                  <button key={l} onClick={fn} style={{...pill(false),padding:'4px',textAlign:'center'}}>{l}</button>
                 ))}
               </div>
             </>}
 
             {rightTab==='save'&&<>
-              <div style={{fontSize:'8px',color:'#34d399',background:'rgba(52,211,153,0.07)',borderRadius:'5px',padding:'4px 7px',fontWeight:700,letterSpacing:'0.06em'}}>
+              <div style={{fontSize:'8px',color:'#34d399',background:'rgba(52,211,153,0.06)',borderRadius:'4px',padding:'4px 6px',fontWeight:700}}>
                 {Math.round(bpm)} BPM · {stepCount} step · {grooveProfile.toUpperCase()} · {harmonicProfile.toUpperCase()}
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px'}}>
-                {[['Load Local',loadProjectLocal,''],['Quick Save',saveProjectLocal,'#34d399'],['Import JSON',()=>importInputRef.current?.click(),''],['Export JSON',exportProjectJson,'']].map(([l,fn,c])=>(
-                  <button key={l} onClick={fn} style={{...pill(!!c,c||'#94a3b8'),padding:'5px',textAlign:'center',fontSize:'8px'}}>{l}</button>
+                {[['Load Local',loadProjectLocal,''  ],['Quick Save',saveProjectLocal,'#34d399'],['Import JSON',()=>importInputRef.current?.click(),''  ],['Export JSON',exportProjectJson,''  ]].map(([l,fn,c])=>(
+                  <button key={l} onClick={fn} style={{...pill(!!c,c||'#64748b'),padding:'5px',textAlign:'center'}}>{l}</button>
                 ))}
               </div>
               <input ref={importInputRef} type="file" accept="application/json" onChange={importProjectFile} style={{display:'none'}}/>
               <div>
-                <div style={{fontSize:'7px',color:'#334155',fontWeight:800,letterSpacing:'0.14em',marginBottom:'3px',textTransform:'uppercase'}}>PROJECT SLOTS</div>
+                <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',marginBottom:'3px',textTransform:'uppercase'}}>PROJECT SLOTS</div>
                 {[0,1,2,3].map(slot=>(
-                  <div key={slot} style={{borderRadius:'5px',border:`1px solid ${currentProjectSlot===slot?'rgba(52,211,153,0.35)':projectSlots[slot]?'rgba(34,211,238,0.18)':BD}`,background:'rgba(255,255,255,0.015)',padding:'4px 6px',marginBottom:'2px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'4px'}}>
-                    <div>
-                      <div style={{fontSize:'8px',fontWeight:800,color:currentProjectSlot===slot?'#34d399':'#475569'}}>P{slot+1}</div>
-                      <div style={{fontSize:'7px',color:'#1e293b'}}>{projectSlots[slot]?.label||'Empty'}</div>
-                    </div>
+                  <div key={slot} style={{borderRadius:'4px',border:`1px solid ${currentProjectSlot===slot?'rgba(52,211,153,0.32)':projectSlots[slot]?'rgba(34,211,238,0.16)':BD}`,background:'rgba(255,255,255,0.015)',padding:'4px 6px',marginBottom:'2px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'3px'}}>
+                    <div><div style={{fontSize:'7.5px',fontWeight:800,color:currentProjectSlot===slot?'#34d399':'#475569'}}>P{slot+1}</div><div style={{fontSize:'6.5px',color:'#1e293b'}}>{projectSlots[slot]?.label||'Empty'}</div></div>
                     <div style={{display:'flex',gap:'2px'}}>
-                      <button onClick={()=>loadProjectSlot(slot)} disabled={!projectSlots[slot]} style={{...pill(false),opacity:projectSlots[slot]?1:0.3,padding:'2px 5px'}}>Load</button>
-                      <button onClick={()=>saveProjectSlot(slot)} style={{...pill(false,'#34d399'),padding:'2px 5px'}}>Save</button>
-                      <button onClick={()=>clearProjectSlot(slot)} disabled={!projectSlots[slot]} style={{...pill(false),opacity:projectSlots[slot]?1:0.3,padding:'2px 5px'}}>×</button>
+                      <button onClick={()=>loadProjectSlot(slot)} disabled={!projectSlots[slot]} style={{...pill(false),opacity:projectSlots[slot]?1:0.28,padding:'2px 4px'}}>Load</button>
+                      <button onClick={()=>saveProjectSlot(slot)} style={{...pill(false,'#34d399'),padding:'2px 4px'}}>Save</button>
+                      <button onClick={()=>clearProjectSlot(slot)} disabled={!projectSlots[slot]} style={{...pill(false),opacity:projectSlots[slot]?1:0.28,padding:'2px 4px'}}>×</button>
                     </div>
                   </div>
                 ))}
               </div>
               <div>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'3px'}}>
-                  <div style={{fontSize:'7px',color:'#334155',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase'}}>RECORDER · {recordMime}</div>
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase'}}>RECORDER</div>
                   <button onClick={recState==='recording'?stopRecording:startRecording} style={pill(recState==='recording','#f43f5e')}>{recState==='recording'?'■ Stop':'⏺ Rec'}</button>
                 </div>
-                {recordings.length===0?<div style={{fontSize:'8px',color:'#1e293b',padding:'6px',textAlign:'center'}}>No recordings yet.</div>:recordings.map((item,idx)=>(
-                  <div key={item.url} style={{borderRadius:'5px',border:`1px solid ${BD}`,background:'rgba(255,255,255,0.015)',padding:'4px 6px',marginBottom:'2px'}}>
+                {recordings.length===0?<div style={{fontSize:'7px',color:'#1e293b',padding:'6px',textAlign:'center'}}>No recordings yet.</div>:recordings.map((item,idx)=>(
+                  <div key={item.url} style={{borderRadius:'4px',border:`1px solid ${BD}`,background:'rgba(255,255,255,0.015)',padding:'4px 6px',marginBottom:'2px'}}>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'3px'}}>
-                      <span style={{fontSize:'8px',fontWeight:800,color:'#64748b'}}>Take {idx+1}</span>
-                      <button onClick={()=>downloadRecording(item)} style={{...pill(false),padding:'2px 6px',fontSize:'8px'}}>↓ Save</button>
+                      <span style={{fontSize:'7.5px',fontWeight:800,color:'#475569'}}>Take {idx+1}</span>
+                      <button onClick={()=>downloadRecording(item)} style={{...pill(false),padding:'2px 5px',fontSize:'7px'}}>↓ Save</button>
                     </div>
                     <audio controls src={item.url} style={{width:'100%',height:'20px'}}/>
                   </div>
                 ))}
+              </div>
+              {/* MIDI status */}
+              <div style={{fontSize:'7px',color:'#1e2d3d',padding:'4px 6px',borderRadius:'4px',background:'rgba(255,255,255,0.015)',border:`1px solid ${BD}`}}>
+                <span style={{color:midiEnabled?'#34d399':'#334155',fontWeight:800}}>MIDI {midiEnabled?'CONNECTED':'NOT AVAILABLE'}</span>
+                {midiEnabled&&<><br/>Kick=CH1 · Snare=CH2 · Hat=CH3 · Bass=CH4 · Synth=CH5<br/>Clock: transmitted on all outputs</>}
               </div>
             </>}
           </div>
