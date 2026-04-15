@@ -77,51 +77,161 @@ const noteToMidi={
   C4:60,Db4:61,D4:62,Eb4:63,E4:64,F4:65,G4:67,Ab4:68,A4:69,Bb4:70,
   C5:72,Db5:73,D5:74,Eb5:75,F5:77,G5:79,A5:81,
 };
+// ─── Musical theory ────────────────────────────────────────────────────────────
 const MODES={
-  minor:   {bass:['C2','D2','Eb2','G2','A2','C3','D3','Eb3'],synth:['C4','D4','Eb4','G4','A4','C5','D5','Eb5']},
-  phrygian:{bass:['C2','Db2','Eb2','G2','Ab2','C3','Db3','Eb3'],synth:['C4','Db4','Eb4','G4','Ab4','C5','Db5','Eb5']},
-  dorian:  {bass:['C2','D2','Eb2','G2','Bb2','C3','D3','F3'],synth:['C4','D4','Eb4','G4','Bb4','C5','D5','F5']},
-  chroma:  {bass:['C2','Db2','Eb2','E2','G2','Ab2','A2','C3'],synth:['C4','Db4','Eb4','E4','G4','Ab4','A4','C5']},
+  minor:   {bass:['C2','D2','Eb2','F2','G2','Ab2','Bb2','C3','D3','Eb3'],synth:['C4','D4','Eb4','F4','G4','Ab4','Bb4','C5','D5','Eb5']},
+  phrygian:{bass:['C2','Db2','Eb2','F2','G2','Ab2','Bb2','C3','Db3','Eb3'],synth:['C4','Db4','Eb4','F4','G4','Ab4','Bb4','C5','Db5','Eb5']},
+  dorian:  {bass:['C2','D2','Eb2','F2','G2','A2','Bb2','C3','D3','Eb3'],synth:['C4','D4','Eb4','F4','G4','A4','Bb4','C5','D5','Eb5']},
+  chroma:  {bass:['C2','Db2','D2','Eb2','E2','F2','G2','Ab2','A2','Bb2'],synth:['C4','Db4','D4','Eb4','E4','F4','G4','Ab4','A4','Bb4']},
+  mixo:    {bass:['C2','D2','E2','F2','G2','A2','Bb2','C3','D3','E3'],synth:['C4','D4','E4','F4','G4','A4','Bb4','C5','D5','E5']},
+  lydian:  {bass:['C2','D2','E2','F#2','G2','A2','B2','C3','D3','E3'],synth:['C4','D4','E4','F#4','G4','A4','B4','C5','D5','E5']},
 };
-const GROOVE_MAP={
-  steady:{kickBias:0.22,snareBias:0.16,hatBias:0.58,bassBias:0.22,synthBias:0.12},
-  broken:{kickBias:0.28,snareBias:0.14,hatBias:0.46,bassBias:0.28,synthBias:0.18},
-  bunker:{kickBias:0.34,snareBias:0.1,hatBias:0.34,bassBias:0.24,synthBias:0.14},
-  float: {kickBias:0.16,snareBias:0.12,hatBias:0.5,bassBias:0.18,synthBias:0.28},
+
+// Chord functions — each chord picks notes from mode scale degrees
+const CHORD_PROGRESSIONS = {
+  minor: [
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i-vi-iv-v
+    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2},{root:0,third:2,fifth:4}], // i-iv-v-i
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:6,third:1,fifth:3},{root:4,third:0,fifth:2}], // i-vi-vii-v
+    [{root:0,third:2,fifth:4},{root:2,third:4,fifth:6},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i-iii-iv-v
+  ],
+  phrygian:[
+    [{root:0,third:1,fifth:3},{root:1,third:3,fifth:5},{root:3,third:5,fifth:0},{root:1,third:3,fifth:5}],
+    [{root:0,third:1,fifth:3},{root:6,third:1,fifth:3},{root:3,third:5,fifth:0},{root:0,third:1,fifth:3}],
+  ],
+  dorian:[
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}],
+    [{root:0,third:2,fifth:4},{root:1,third:3,fifth:5},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3}],
+  ],
+  mixo:[
+    [{root:0,third:2,fifth:4},{root:6,third:1,fifth:3},{root:4,third:6,fifth:1},{root:0,third:2,fifth:4}],
+    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3},{root:4,third:6,fifth:1}],
+  ],
+  lydian:[
+    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:6,fifth:1},{root:2,third:4,fifth:6}],
+  ],
+  chroma:[
+    [{root:0,third:1,fifth:4},{root:3,third:6,fifth:1},{root:7,third:2,fifth:5},{root:4,third:9,fifth:2}],
+  ],
 };
-// Default per-step data
-const makeStepData=()=>Array.from({length:MAX_STEPS},()=>({on:false,prob:1.0,len:1,vel:1.0}));
 
-// ─── Pure helpers ──────────────────────────────────────────────────────────────
-const clamp=(v,mn,mx)=>Math.min(mx,Math.max(mn,v));
-const seededChoice=arr=>arr[Math.floor(Math.random()*arr.length)];
-const rotateArray=(arr,steps)=>arr.map((_,i)=>arr[(i-steps+arr.length)%arr.length]);
-const makeEmptyNotes=(d='C2')=>Array.from({length:MAX_STEPS},()=>d);
+// Section archetypes — how a "part" of a song feels
+const SECTION_ARCHETYPES = {
+  intro:    {kickMult:0.5,snareMult:0.4,hatMult:0.6,bassMult:0.7,synthMult:0.5,velCurve:'rise',probFloor:0.55,lenBias:2},
+  build:    {kickMult:0.75,snareMult:0.6,hatMult:0.9,bassMult:0.9,synthMult:0.7,velCurve:'rise',probFloor:0.65,lenBias:1.5},
+  drop:     {kickMult:1.2,snareMult:1.0,hatMult:1.0,bassMult:1.1,synthMult:0.9,velCurve:'accent',probFloor:0.8,lenBias:1},
+  groove:   {kickMult:1.0,snareMult:1.0,hatMult:1.1,bassMult:1.0,synthMult:1.0,velCurve:'groove',probFloor:0.75,lenBias:1},
+  break:    {kickMult:0.3,snareMult:0.5,hatMult:0.4,bassMult:0.6,synthMult:1.2,velCurve:'flat',probFloor:0.5,lenBias:3},
+  outro:    {kickMult:0.6,snareMult:0.5,hatMult:0.5,bassMult:0.5,synthMult:0.6,velCurve:'fall',probFloor:0.45,lenBias:2},
+};
 
-function makePatternTemplate(sc=DEFAULT_STEPS){
-  const mk=()=>makeStepData();
-  const p={kick:mk(),snare:mk(),hat:mk(),bass:mk(),synth:mk()};
-  [0,8,12,24,32,40,56].forEach(i=>{if(i<sc)p.kick[i].on=true;});
-  [4,12,20,28,36,44,52,60].forEach(i=>{if(i<sc)p.snare[i].on=true;});
-  for(let i=0;i<sc;i+=2)p.hat[i].on=true;
-  [0,3,7,10,13,18,22,29,33,39,46,53].forEach(i=>{if(i<sc)p.bass[i].on=true;});
-  [2,6,11,14,19,27,35,43,50,58].forEach(i=>{if(i<sc)p.synth[i].on=true;});
-  return p;
+// Voice leading: move by smallest interval in scale
+function voiceLead(currentNote, pool, direction='any'){
+  if(!pool.length)return currentNote;
+  const idx=pool.indexOf(currentNote);
+  if(idx===-1)return pool[Math.floor(Math.random()*pool.length)];
+  if(direction==='up')return pool[Math.min(idx+1,pool.length-1)];
+  if(direction==='down')return pool[Math.max(idx-1,0)];
+  // 'any': prefer step motion, allow occasional leap
+  const r=Math.random();
+  if(r<0.55)return pool[Math.min(idx+1,pool.length-1)];
+  if(r<0.8)return pool[Math.max(idx-1,0)];
+  return pool[clamp(idx+(Math.random()<0.5?2:-2),0,pool.length-1)];
 }
 
-function chooseMode(chaos){if(chaos>0.78)return'chroma';if(chaos>0.56)return seededChoice(['minor','phrygian']);return seededChoice(['minor','dorian','phrygian']);}
-function chooseGroove(density,chaos){if(density>0.68&&chaos>0.45)return'bunker';if(chaos>0.62)return'broken';if(density<0.38)return'float';return'steady';}
-
-function buildNoteLanes(stepCount,modeName,grooveName,chaos){
-  const mode=MODES[modeName]||MODES.minor,groove=GROOVE_MAP[grooveName]||GROOVE_MAP.steady;
-  const bassLine=makeEmptyNotes(mode.bass[0]),synthLine=makeEmptyNotes(mode.synth[0]);
-  const anchorBass=[0,0,2,0,4,0,2,0],anchorSynth=chaos>0.58?[4,2,6,4,1,4,6,2]:[4,2,4,6,1,4,2,4];
-  for(let i=0;i<stepCount;i++){
-    const phrase=Math.floor(i/8)%anchorBass.length,motion=(i%4===3&&Math.random()<groove.bassBias)?1:0;
-    bassLine[i]=mode.bass[(anchorBass[phrase]+motion+(Math.random()<chaos*0.18?1:0))%mode.bass.length];
-    synthLine[i]=mode.synth[(anchorSynth[phrase]+(i%8===6?1:0)+(Math.random()<chaos*0.24?2:0))%mode.synth.length];
+// Velocity curves for different section archetypes
+function velCurve(type, stepIdx, totalSteps, phraseWeight){
+  const t=stepIdx/totalSteps;
+  switch(type){
+    case'rise':  return clamp(0.35+t*0.65*phraseWeight,0.2,1);
+    case'fall':  return clamp(0.95-t*0.55,0.2,1);
+    case'accent':return stepIdx%4===0?clamp(0.9+phraseWeight*0.1,0.7,1):clamp(0.55+phraseWeight*0.3,0.3,0.85);
+    case'groove':return stepIdx%8===0?0.95:stepIdx%4===0?0.78:stepIdx%2===0?0.62:0.45+Math.random()*0.2;
+    case'flat':  return clamp(0.6+phraseWeight*0.2,0.4,0.85);
+    default:     return clamp(0.5+phraseWeight*0.5,0.3,1);
   }
-  if(chaos>0.66)return{bassLine:rotateArray(bassLine,Math.floor(Math.random()*3)),synthLine:rotateArray(synthLine,Math.floor(Math.random()*5))};
+}
+
+// Arpeggio patterns
+function arpeggiate(notes, mode, step, total){
+  if(!notes.length)return notes[0];
+  const n=notes.length;
+  switch(mode){
+    case'up':    return notes[step%n];
+    case'down':  return notes[(n-1)-(step%n)];
+    case'updown':{const period=n*2-2;const p=step%period;return p<n?notes[p]:notes[period-p];}
+    case'random':return notes[Math.floor(Math.random()*n)];
+    case'outside':{const p=step%n;return p%2===0?notes[Math.floor(p/2)]:notes[n-1-Math.floor(p/2)];}
+    default:     return notes[step%n];
+  }
+}
+
+// Build chord notes from progression
+function chordNotes(chord, pool){
+  const len=pool.length;
+  return [
+    pool[chord.root%len],
+    pool[chord.third%len],
+    pool[chord.fifth%len],
+  ].filter(Boolean);
+}
+
+function chooseMode(chaos){
+  if(chaos>0.82)return seededChoice(['chroma','phrygian']);
+  if(chaos>0.62)return seededChoice(['minor','phrygian','dorian']);
+  if(chaos>0.42)return seededChoice(['minor','dorian','mixo']);
+  return seededChoice(['minor','mixo','lydian']);
+}
+function chooseGroove(density,chaos){
+  if(density>0.68&&chaos>0.45)return'bunker';
+  if(chaos>0.62)return'broken';
+  if(density<0.38)return'float';
+  return'steady';
+}
+function chooseSection(density,chaos,iterCount){
+  // iterCount: how many times Freestyle/AutoJam has been pressed this session
+  if(iterCount===0)return seededChoice(['intro','groove']);
+  if(density<0.3)return seededChoice(['break','intro']);
+  if(density>0.75&&chaos>0.5)return seededChoice(['drop','drop','groove']);
+  if(density>0.55)return seededChoice(['groove','build','drop']);
+  return seededChoice(['groove','break','build']);
+}
+
+function buildNoteLanes(stepCount, modeName, grooveName, chaos, progression, arpeMode, sectionType){
+  const mode=MODES[modeName]||MODES.minor;
+  const arch=SECTION_ARCHETYPES[sectionType]||SECTION_ARCHETYPES.groove;
+  const bassPool=mode.bass;
+  const synthPool=mode.synth;
+  const bassLine=makeEmptyNotes(bassPool[0]);
+  const synthLine=makeEmptyNotes(synthPool[0]);
+  const chordLen=Math.floor(stepCount/4); // 4 chords across the pattern
+  let lastBass=bassPool[0];
+
+  for(let i=0;i<stepCount;i++){
+    const chordIdx=Math.floor(i/chordLen)%progression.length;
+    const chord=progression[chordIdx];
+    const bassChordNotes=chordNotes(chord,bassPool);
+    const synthChordNotes=chordNotes(chord,synthPool);
+
+    // Bass: voice leading within chord tones, occasional passing tone
+    const isPassingTone=Math.random()<chaos*0.15;
+    if(isPassingTone){
+      lastBass=voiceLead(lastBass,bassPool,'any');
+    } else {
+      // Move to nearest chord tone
+      const nearest=bassChordNotes.reduce((best,n)=>{
+        const bIdx=bassPool.indexOf(best),nIdx=bassPool.indexOf(n);
+        const cIdx=bassPool.indexOf(lastBass);
+        return Math.abs(nIdx-cIdx)<Math.abs(bIdx-cIdx)?n:best;
+      },bassChordNotes[0]);
+      lastBass=nearest;
+    }
+    bassLine[i]=lastBass;
+
+    // Synth: arpeggio over chord tones, with occasional chromatic colour
+    synthLine[i]=arpeggiate(synthChordNotes,arpeMode,i,stepCount);
+  }
+
   return{bassLine,synthLine};
 }
 
@@ -148,43 +258,103 @@ function getGrooveAccent(profile,lane,stepIndex,amount){
   const table=(maps[profile]||maps.steady)[lane]||maps.steady.kick;return 1+(table[pos]||1-1)*clamp(amount,0,1);
 }
 
+// Main generative function — now musically aware
 function buildFreestylePattern(stepCount,laneStepCounts,density,chaos,currentPresets,options={}){
-  const grooveName=chooseGroove(density,chaos),modeName=chooseMode(chaos),autoLength=options.autoLength??true;
+  const grooveName=chooseGroove(density,chaos);
+  const modeName=chooseMode(chaos);
+  const sectionType=options.sectionType||chooseSection(density,chaos,options.iterCount||0);
+  const arch=SECTION_ARCHETYPES[sectionType]||SECTION_ARCHETYPES.groove;
+  const arpeMode=seededChoice(['up','down','updown','random','outside']);
+  const autoLength=options.autoLength??true;
   const gl=autoLength?chooseLaneLengths(density,chaos,grooveName):{...laneStepCounts,section:'manual-grid'};
   const ell={kick:gl.kick||laneStepCounts.kick||stepCount,snare:gl.snare||laneStepCounts.snare||stepCount,hat:gl.hat||laneStepCounts.hat||stepCount,bass:gl.bass||laneStepCounts.bass||stepCount,synth:gl.synth||laneStepCounts.synth||stepCount};
   const masterLength=Math.max(...Object.values(ell));
+
+  // Pick a chord progression for this mode
+  const progPool=CHORD_PROGRESSIONS[modeName]||CHORD_PROGRESSIONS.minor;
+  const progression=seededChoice(progPool);
+
+  const{bassLine,synthLine}=buildNoteLanes(masterLength,modeName,grooveName,chaos,progression,arpeMode,sectionType);
+
   const p={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};
-  const groove=GROOVE_MAP[grooveName];const{bassLine,synthLine}=buildNoteLanes(masterLength,modeName,grooveName,chaos);
-  const bar=16,phraseShape=seededChoice(['anchor','stagger','mirror','fall']);
-  for(const lane of LANE_KEYS){const ll=ell[lane]||masterLength;for(let i=0;i<ll;i++){
-    const pos=i%bar,strong=pos===0||pos===8,backbeat=pos===4||pos===12,offbeat=pos%2===1,pb=Math.floor(i/8)%4;
-    const pw=phraseShape==='anchor'?[1,0.75,0.92,0.68][pb]:phraseShape==='stagger'?[0.72,1,0.66,0.94][pb]:phraseShape==='mirror'?[1,0.78,0.78,1][pb]:[1,0.9,0.68,0.56][pb];
-    let hit=false;
-    if(lane==='kick'){if(strong||Math.random()<(groove.kickBias+density*0.18+(strong?0.2:0))*pw)hit=true;}
-    else if(lane==='snare'){if(backbeat||Math.random()<(groove.snareBias+density*0.08+(backbeat?0.26:0))*(1.06-pw*0.18))hit=true;}
-    else if(lane==='hat'){if(Math.random()<(!offbeat?groove.hatBias-0.08+density*0.2:groove.hatBias+density*0.16)*(0.82+pw*0.22))hit=true;}
-    else if(lane==='bass'){if(Math.random()<(pos===0||pos===3||pos===7?0.94:groove.bassBias+density*0.14)*(0.8+pw*0.26))hit=true;}
-    else if(lane==='synth'){if((Math.random()<(pos===2||pos===6||pos===10?0.72:groove.synthBias+density*0.1)*(0.7+pw*0.34)&&!strong)||(pb===3&&Math.random()<0.18+chaos*0.16))hit=true;}
-    if(hit){p[lane][i].on=true;p[lane][i].prob=clamp(0.6+Math.random()*0.4,0.5,1);p[lane][i].vel=clamp(0.5+pw*0.5+Math.random()*0.2,0.4,1);}
-  }}
+  const groove=GROOVE_MAP[grooveName];
+  const bar=16;
+  const phraseShape=seededChoice(['anchor','stagger','mirror','fall','wave']);
+
+  for(const lane of LANE_KEYS){
+    const ll=ell[lane]||masterLength;
+    const laneMult=arch[lane+'Mult']??1;
+    for(let i=0;i<ll;i++){
+      const pos=i%bar,strong=pos===0||pos===8,backbeat=pos===4||pos===12,offbeat=pos%2===1,pb=Math.floor(i/8)%4;
+      const pw=phraseShape==='anchor'?[1,0.75,0.92,0.68][pb]:phraseShape==='stagger'?[0.72,1,0.66,0.94][pb]:phraseShape==='mirror'?[1,0.78,0.78,1][pb]:phraseShape==='wave'?[0.6,0.8,1,0.85][pb]:[1,0.9,0.68,0.56][pb];
+      let hit=false;
+      const dm=density*laneMult;
+      if(lane==='kick'){if(strong||Math.random()<(groove.kickBias+dm*0.18+(strong?0.2:0))*pw)hit=true;}
+      else if(lane==='snare'){if(backbeat||Math.random()<(groove.snareBias+dm*0.08+(backbeat?0.26:0))*(1.06-pw*0.18))hit=true;}
+      else if(lane==='hat'){if(Math.random()<(!offbeat?groove.hatBias-0.08+dm*0.2:groove.hatBias+dm*0.16)*(0.82+pw*0.22))hit=true;}
+      else if(lane==='bass'){if(Math.random()<(pos===0||pos===3||pos===7?0.94:groove.bassBias+dm*0.14)*(0.8+pw*0.26))hit=true;}
+      else if(lane==='synth'){if((Math.random()<(pos===2||pos===6||pos===10?0.72:groove.synthBias+dm*0.1)*(0.7+pw*0.34)&&!strong)||(pb===3&&Math.random()<0.18+chaos*0.16))hit=true;}
+      if(hit){
+        p[lane][i].on=true;
+        // Probability from section archetype
+        p[lane][i].prob=clamp(arch.probFloor+Math.random()*(1-arch.probFloor),arch.probFloor,1);
+        // Velocity from curve
+        p[lane][i].vel=clamp(velCurve(arch.velCurve,i,ll,pw),0.25,1);
+        // Note length from section bias + lane type
+        const baseLenBias=arch.lenBias;
+        if(lane==='bass'||lane==='synth'){
+          const r=Math.random();
+          p[lane][i].len=r<0.5?baseLenBias:r<0.75?baseLenBias*2:r<0.9?0.5:baseLenBias*0.75;
+        } else {
+          p[lane][i].len=1;
+        }
+      }
+    }
+  }
+  // Guarantee anchors
   for(let i=0;i<ell.kick;i+=16)p.kick[i].on=true;
   for(let i=0;i<ell.snare;i+=16){if(i+4<ell.snare)p.snare[i+4].on=true;if(i+12<ell.snare)p.snare[i+12].on=true;}
+  // Mutation passes
   const mp=Math.max(2,Math.floor(chaos*10));
   for(let m=0;m<mp;m++){const lane=seededChoice(LANE_KEYS),ll=ell[lane]||masterLength,pos=Math.floor(Math.random()*ll);
-    if(lane==='hat'){p.hat[pos].on=!p.hat[pos].on;if(chaos>0.52&&pos+2<ll&&Math.random()<0.34)p.hat[pos+2].on=true;}
+    if(lane==='hat'){p.hat[pos].on=!p.hat[pos].on;}
     else if(lane==='kick'){if(pos%4!==0)p.kick[pos].on=Math.random()<0.42+chaos*0.22;}
-    else if(lane==='bass'){p.bass[pos].on=!p.bass[pos].on;if(Math.random()<0.34)bassLine[pos]=seededChoice(MODES[modeName].bass);}
-    else if(lane==='synth'){p.synth[pos].on=!p.synth[pos].on;if(Math.random()<0.4)synthLine[pos]=seededChoice(MODES[modeName].synth);}
+    else if(lane==='bass'||lane==='synth'){p[lane][pos].on=!p[lane][pos].on;}
     else{p.snare[pos].on=!p.snare[pos].on&&pos%4!==0;}
   }
   for(let i=ell.bass;i<MAX_STEPS;i++)bassLine[i]=bassLine[Math.max(0,i%Math.max(1,ell.bass))];
   for(let i=ell.synth;i<MAX_STEPS;i++)synthLine[i]=synthLine[Math.max(0,i%Math.max(1,ell.synth))];
-  return{patterns:p,bassLine,synthLine,laneLengths:ell,sectionProfile:gl.section||'manual-grid',harmonicProfile:modeName,grooveProfile:grooveName,
+
+  return{patterns:p,bassLine,synthLine,laneLengths:ell,
+    sectionProfile:sectionType+' · '+gl.section,
+    harmonicProfile:modeName,grooveProfile:grooveName,arpeMode,
     drumPreset:Math.floor((Math.random()*drumPresets.length+currentPresets.drumPreset*0.35)%drumPresets.length),
     bassPreset:Math.floor((Math.random()*bassPresets.length+currentPresets.bassPreset*0.35)%bassPresets.length),
     synthPreset:Math.floor((Math.random()*synthPresets.length+currentPresets.synthPreset*0.35)%synthPresets.length),
     fxPreset:Math.floor(Math.random()*fxScenes.length),
   };
+}
+
+// ─── Core helpers (needed by both generative and component code) ──────────────
+const GROOVE_MAP={
+  steady:{kickBias:0.22,snareBias:0.16,hatBias:0.58,bassBias:0.22,synthBias:0.12},
+  broken:{kickBias:0.28,snareBias:0.14,hatBias:0.46,bassBias:0.28,synthBias:0.18},
+  bunker:{kickBias:0.34,snareBias:0.1,hatBias:0.34,bassBias:0.24,synthBias:0.14},
+  float: {kickBias:0.16,snareBias:0.12,hatBias:0.5,bassBias:0.18,synthBias:0.28},
+};
+const makeStepData=()=>Array.from({length:MAX_STEPS},()=>({on:false,prob:1.0,len:1,vel:1.0}));
+const clamp=(v,mn,mx)=>Math.min(mx,Math.max(mn,v));
+const seededChoice=arr=>arr[Math.floor(Math.random()*arr.length)];
+const rotateArray=(arr,steps)=>arr.map((_,i)=>arr[(i-steps+arr.length)%arr.length]);
+const makeEmptyNotes=(d='C2')=>Array.from({length:MAX_STEPS},()=>d);
+function makePatternTemplate(sc=DEFAULT_STEPS){
+  const p={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};
+  [0,8,12,24,32,40,56].forEach(i=>{if(i<sc)p.kick[i].on=true;});
+  [4,12,20,28,36,44,52,60].forEach(i=>{if(i<sc)p.snare[i].on=true;});
+  for(let i=0;i<sc;i+=2)p.hat[i].on=true;
+  [0,3,7,10,13,18,22,29,33,39,46,53].forEach(i=>{if(i<sc)p.bass[i].on=true;});
+  [2,6,11,14,19,27,35,43,50,58].forEach(i=>{if(i<sc)p.synth[i].on=true;});
+  return p;
 }
 
 // ─── UI Components ─────────────────────────────────────────────────────────────
@@ -294,7 +464,9 @@ export default function CesiraV1(){
   const [projectName,setProjectName]=useState('CESIRA Session');const [metronomeOn,setMetronomeOn]=useState(false);const [metronomeLevel,setMetronomeLevel]=useState(0.42);
   const [projectSlots,setProjectSlots]=useState([null,null,null,null]);const [currentProjectSlot,setCurrentProjectSlot]=useState(null);
   const [rightTab,setRightTab]=useState('knobs');
-  const [sdLane,setSdLane]=useState('bass'); // sound design lane selector — must be at component level
+  const [sdLane,setSdLane]=useState('bass');
+  const [iterCount,setIterCount]=useState(0);
+  const [arpeMode,setArpeMode]=useState('up');
   const [laneVU,setLaneVU]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
@@ -304,8 +476,9 @@ export default function CesiraV1(){
   const [scopeAnalyser,setScopeAnalyser]=useState(null);
   // Sound Design — per-lane custom synth params (overrides preset when active)
   const [soundDesign,setSoundDesign]=useState({
-    bass:  {active:false,osc:'sawtooth',osc2:'sine',detune:5,filterType:'lowpass',cutoff:0.55,res:0.3,atk:0.008,dec:0.25,sus:0.6,rel:0.4,sub:0.5,drive:0.1},
+    bass:  {active:false,osc:'sawtooth',osc2:'sine',detune:5,filterType:'lowpass',cutoff:0.55,res:0.3,atk:0.008,dec:0.25,sus:0.6,rel:0.4,sub:0.5,drive:0.1,glide:0},
     synth: {active:false,osc:'sawtooth',osc2:'triangle',detune:8,filterType:'lowpass',cutoff:0.65,res:0.2,atk:0.02,dec:0.3,sus:0.7,rel:0.5,drive:0.08,lfo:0.3,lfoRate:3},
+    drum:  {pitchEnvAmt:0.5,pitchEnvTime:0.12,noiseColor:'white',kickFreq:108,kickEnd:40},
   });
   const soundDesignRef=useRef(soundDesign);
 
@@ -502,16 +675,43 @@ export default function CesiraV1(){
     return{carrier,modulator,modGain};
   };
 
-  // ─── Sound synthesis ───────────────────────────────────────────────────────
+  // Colored noise buffer: white=flat, pink=-3dB/oct, brown=-6dB/oct
+  const createColoredNoise=(len=0.2,amount=1,color='white')=>{
+    const a=audioRef.current;const sr=a.ctx.sampleRate;const buf=a.ctx.createBuffer(1,Math.floor(sr*len),sr);
+    const d=buf.getChannelData(0);
+    if(color==='white'){for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*amount;return buf;}
+    // Pink: sum of octave-decimated white noise
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0;
+    for(let i=0;i<d.length;i++){
+      const w=(Math.random()*2-1);
+      if(color==='pink'){b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;b2=0.96900*b2+w*0.1538520;b3=0.86650*b3+w*0.3104856;b4=0.55000*b4+w*0.5329522;b5=-0.7616*b5-w*0.0168980;d[i]=(b0+b1+b2+b3+b4+b5+w*0.5362)*amount*0.11;}
+      else{b0=0.99*b0+w*0.01;d[i]=b0*amount*3;} // brown
+    }
+    return buf;
+  };
+
   const playDrumAt=(pi,accent,t)=>{
-    const audio=audioRef.current;if(!audio)return;const p=drumPresets[pi],nb=createNoise(0.2,0.22+noise*0.55);
+    const audio=audioRef.current;if(!audio)return;
+    const p=drumPresets[pi];
+    const ds=soundDesignRef.current?.drum||{pitchEnvAmt:0.5,pitchEnvTime:0.12,noiseColor:'white',kickFreq:108,kickEnd:40};
+    const noiseColor=ds.noiseColor||'white';
+    const nb=createColoredNoise(0.2,0.22+noise*0.55,noiseColor);
+
     if(p.type.startsWith('kick')){
       const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain(),sh=audio.ctx.createWaveShaper();
-      setDriveCurve(sh,0.12+noise*0.12);osc.type=p.type==='kick'?'sine':'triangle';osc.frequency.setValueAtTime(p.type==='kick'?108:88,t);osc.frequency.exponentialRampToValueAtTime(40,t+0.13);
-      rampEnv(g.gain,t,0.001,0.1+drumDecay*0.2,0.88*accent);osc.connect(sh);sh.connect(g);const fx=routeLaneFx(g,'kick');cleanup(osc,[g,sh,...fx],600);safeStart(osc,t);safeStop(osc,t+0.26);return;
+      setDriveCurve(sh,0.12+noise*0.12);
+      osc.type=p.type==='kick'?'sine':'triangle';
+      const kickFreq=ds.kickFreq||(p.type==='kick'?108:88);
+      const kickEnd=ds.kickEnd||40;
+      const envTime=clamp(ds.pitchEnvTime??0.12,0.04,0.5);
+      osc.frequency.setValueAtTime(kickFreq,t);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(30,kickEnd),t+envTime);
+      rampEnv(g.gain,t,0.001,0.1+drumDecay*0.2,0.88*accent);
+      osc.connect(sh);sh.connect(g);const fx=routeLaneFx(g,'kick');cleanup(osc,[g,sh,...fx],600);safeStart(osc,t);safeStop(osc,t+0.26);return;
     }
     if(p.type==='tom'){
-      const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='sine';osc.frequency.setValueAtTime(155,t);osc.frequency.exponentialRampToValueAtTime(80,t+0.15);
+      const osc=audio.ctx.createOscillator(),g=audio.ctx.createGain();osc.type='sine';
+      osc.frequency.setValueAtTime(155,t);osc.frequency.exponentialRampToValueAtTime(80,t+0.15);
       rampEnv(g.gain,t,0.001,0.08+drumDecay*0.18,0.75*accent);osc.connect(g);const fx=routeLaneFx(g,'kick');cleanup(osc,[g,...fx],600);safeStart(osc,t);safeStop(osc,t+0.22);return;
     }
     const src=audio.ctx.createBufferSource(),fil=audio.ctx.createBiquadFilter(),g=audio.ctx.createGain();src.buffer=nb;
@@ -549,7 +749,17 @@ export default function CesiraV1(){
       const o1=audio.ctx.createOscillator(),o2=audio.ctx.createOscillator(),sub=audio.ctx.createGain();
       const fil=audio.ctx.createBiquadFilter(),g=audio.ctx.createGain(),driveN=audio.ctx.createWaveShaper();
       o1.type=sd.osc;o2.type=sd.osc2;
-      o1.frequency.value=f;o2.frequency.value=f*(1+sd.detune/1200);
+      // Glide: if glide>0, start from last played frequency
+      const glideTime=sd.glide||0;
+      if(glideTime>0&&window._cesiraLastBassFreq){
+        o1.frequency.setValueAtTime(window._cesiraLastBassFreq,t);
+        o1.frequency.exponentialRampToValueAtTime(f,t+glideTime);
+        o2.frequency.setValueAtTime(window._cesiraLastBassFreq*(1+sd.detune/1200),t);
+        o2.frequency.exponentialRampToValueAtTime(f*(1+sd.detune/1200),t+glideTime);
+      } else {
+        o1.frequency.value=f;o2.frequency.value=f*(1+sd.detune/1200);
+      }
+      window._cesiraLastBassFreq=f;
       sub.gain.value=sd.sub;fil.type=sd.filterType;
       fil.frequency.setValueAtTime(80+sd.cutoff*4000,t);fil.Q.value=0.5+sd.res*8;
       setDriveCurve(driveN,sd.drive);
@@ -785,8 +995,44 @@ export default function CesiraV1(){
   const clearAll=()=>{stopClock();const empty={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};pushUndo(patterns);setPatterns(empty);setBassLine(makeEmptyNotes('C2'));setSynthLine(makeEmptyNotes('C4'));setLaneStepCounts({kick:16,snare:16,hat:16,bass:16,synth:16});setSectionProfile('pulse-cell');setHarmonicProfile('minor');setGrooveProfile('steady');setStatusText('Cleared.');};
   const handleStepCount=n=>{const s=clamp(n,16,MAX_STEPS);setLaneStepCounts({kick:s,snare:s,hat:s,bass:s,synth:s});};
   const setLaneStepCount=(lane,n)=>setLaneStepCounts(prev=>({...prev,[lane]:clamp(n,16,MAX_STEPS)}));
-  const randomize=()=>{const fs=buildFreestylePattern(stepCount,laneStepCounts,density,chaos,{drumPreset,bassPreset,synthPreset},{autoLength:true});pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);setStatusText(`${fs.sectionProfile} · ${fs.grooveProfile} · ${fs.harmonicProfile}`);};
-  const autoJam=()=>{const fs=buildFreestylePattern(stepCount,laneStepCounts,clamp(density+0.08,0.1,0.95),clamp(chaos+0.12,0,1),{drumPreset,bassPreset,synthPreset},{autoLength:true});pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);setTone(clamp(0.35+Math.random()*0.55,0.1,1));setNoise(clamp(0.14+Math.random()*0.62,0,1));setSpace(clamp(0.12+Math.random()*0.58,0,1));setSwing(clamp(Math.random()*0.18,0,0.25));setBassCutoff(clamp(0.2+Math.random()*0.65,0,1));setSynthCutoff(clamp(0.28+Math.random()*0.62,0,1));setBassSubAmount(clamp(0.35+Math.random()*0.65,0.1,1));setSynthAttack(clamp(Math.random()*0.45,0,1));setSynthRelease(clamp(0.2+Math.random()*0.75,0,1));setLaneFx(prev=>({kick:{...prev.kick,drive:clamp(0.08+Math.random()*0.26,0,1),tone:clamp(0.3+Math.random()*0.4,0,1),echo:0},snare:{...prev.snare,drive:clamp(0.06+Math.random()*0.2,0,1),tone:clamp(0.42+Math.random()*0.33,0,1),echo:clamp(Math.random()*0.13,0,1)},hat:{...prev.hat,tone:clamp(0.6+Math.random()*0.3,0,1),crush:clamp(Math.random()*0.18,0,1)},bass:{...prev.bass,drive:clamp(0.08+Math.random()*0.24,0,1),tone:clamp(0.2+Math.random()*0.36,0,1),echo:clamp(Math.random()*0.07,0,1)},synth:{...prev.synth,drive:clamp(0.06+Math.random()*0.22,0,1),tone:clamp(0.46+Math.random()*0.36,0,1),echo:clamp(0.08+Math.random()*0.18,0,1)}}));setStatusText(`Auto Jam · ${fs.sectionProfile} · ${fs.grooveProfile}`);};
+  const randomize=()=>{
+    const fs=buildFreestylePattern(stepCount,laneStepCounts,density,chaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
+    pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
+    setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
+    setArpeMode(fs.arpeMode||'up');
+    setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
+    setIterCount(c=>c+1);
+    setStatusText(`${fs.sectionProfile} · ${fs.grooveProfile} · ${fs.harmonicProfile} · arp:${fs.arpeMode}`);
+  };
+  const autoJam=()=>{
+    // Gradual evolution — parameters shift from current values, not random jump
+    const newDensity=clamp(density+(Math.random()-0.4)*0.18,0.1,0.95);
+    const newChaos=clamp(chaos+(Math.random()-0.4)*0.14,0,1);
+    const fs=buildFreestylePattern(stepCount,laneStepCounts,newDensity,newChaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
+    pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
+    setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
+    setArpeMode(fs.arpeMode||'up');setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
+    // Gradual parameter evolution — never jumps to extremes
+    setDensity(newDensity);setChaos(newChaos);
+    setTone(clamp(tone+(Math.random()-0.5)*0.22,0.1,1));
+    setNoise(clamp(noise+(Math.random()-0.5)*0.18,0,1));
+    setSpace(clamp(space+(Math.random()-0.5)*0.2,0,1));
+    setSwing(clamp(swing+(Math.random()-0.5)*0.06,0,0.25));
+    setBassCutoff(clamp(bassCutoff+(Math.random()-0.5)*0.3,0,1));
+    setSynthCutoff(clamp(synthCutoff+(Math.random()-0.5)*0.28,0,1));
+    setBassSubAmount(clamp(bassSubAmount+(Math.random()-0.5)*0.2,0.1,1));
+    setSynthAttack(clamp(synthAttack+(Math.random()-0.5)*0.12,0,1));
+    setSynthRelease(clamp(synthRelease+(Math.random()-0.5)*0.18,0,1));
+    setLaneFx(prev=>({
+      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.12,0,1),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.15,0,1)},
+      snare:{...prev.snare,drive:clamp(prev.snare.drive+(Math.random()-0.5)*0.1,0,1),echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.08,0,1)},
+      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.14,0,1),crush:clamp(prev.hat.crush+(Math.random()-0.5)*0.08,0,1)},
+      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.1,0,1),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.14,0,1)},
+      synth:{...prev.synth,drive:clamp(prev.synth.drive+(Math.random()-0.5)*0.1,0,1),echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.1,0,1)},
+    }));
+    setIterCount(c=>c+1);
+    setStatusText(`Auto Jam #${iterCount+1} · ${fs.sectionProfile} · ${fs.harmonicProfile}`);
+  };
   const triggerStutter=async()=>{await initAudio();const audio=audioRef.current;if(!audio)return;const b=Math.max(2,stutterBurst),t=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCounts[activeLane]||stepCount);for(let i=0;i<b;i++){const st=t+i*0.048;if(activeLane==='kick')playDrumAt(Math.min(drumPreset,1),i===0?1:0.7,st);else if(activeLane==='snare')playDrumAt(drumPreset<2?2:3,i===0?1:0.7,st);else if(activeLane==='hat')playDrumAt(drumPreset<4?4:5,i===0?1:0.7,st);else if(activeLane==='bass')playBassAt(bassPreset,bassLine[li]||'C2',i===0?1:0.7,st);else if(activeLane==='synth')playSynthAt(synthPreset,synthLine[li]||'C4',i===0?1:0.7,st);}flashLane(activeLane,1);setStatusText(`${activeLane.toUpperCase()} stutter x${b}.`);};
 
   const fillLane=(lane,amount)=>{pushUndo(patterns);setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<laneStepCounts[lane];i++){n[lane][i]={...n[lane][i],on:Math.random()<amount,prob:clamp(0.6+Math.random()*0.4,0.5,1),vel:clamp(0.5+Math.random()*0.5,0.4,1)};}return n;});};
@@ -906,6 +1152,8 @@ export default function CesiraV1(){
               <span style={{fontSize:'8px',fontWeight:800,color:'#67e8f9'}}>{harmonicProfile.toUpperCase()}</span>
               <span style={{color:'#1e293b',fontSize:'8px'}}>·</span>
               <span style={{fontSize:'7px',fontWeight:600,color:'#fbbf24'}}>{sectionProfile}</span>
+              <span style={{color:'#1e293b',fontSize:'8px'}}>·</span>
+              <span style={{fontSize:'7px',fontWeight:600,color:'#a78bfa'}}>arp:{arpeMode}</span>
             </div>
             <div style={{display:'flex',gap:'2px',alignItems:'center'}}>
               <button onClick={()=>setPage(p=>clamp(p-1,0,totalPages-1))} disabled={page===0} style={{...pill(false),padding:'1px 5px',opacity:page===0?0.3:1}}>‹</button>
@@ -1137,61 +1385,57 @@ export default function CesiraV1(){
 
             {rightTab==='sound'&&(()=>{
               const sd=soundDesign[sdLane];
-              const lc=LANE_COLOR[sdLane];
+              const lc=LANE_COLOR[sdLane]||'#34d399';
               const update=(k,v)=>setSoundDesign(prev=>({...prev,[sdLane]:{...prev[sdLane],[k]:v}}));
               const oscTypes=['sine','triangle','square','sawtooth'];
               const filterTypes=['lowpass','highpass','bandpass','notch'];
+              const isDrum=sdLane==='drum';
+              const ds=soundDesign.drum;
               return(<>
-                <div style={{display:'flex',gap:'3px',marginBottom:'2px'}}>
-                  {['bass','synth'].map(l=><button key={l} onClick={()=>setSdLane(l)} style={{...pill(sdLane===l,LANE_COLOR[l]),padding:'3px 10px',fontSize:'8px'}}>{l.toUpperCase()}</button>)}
-                  <div style={{flex:1}}/>
-                  <button onClick={()=>update('active',!sd.active)}
-                    style={{...pill(sd.active,'#34d399'),padding:'3px 8px',fontSize:'8px',fontWeight:900}}>
-                    {sd.active?'● CUSTOM':'○ PRESET'}
-                  </button>
+                <div style={{display:'flex',gap:'2px',marginBottom:'2px',flexWrap:'wrap'}}>
+                  {['bass','synth','drum'].map(l=><button key={l} onClick={()=>setSdLane(l)} style={{...pill(sdLane===l,l==='drum'?'#f87171':LANE_COLOR[l]),padding:'2px 8px',fontSize:'8px'}}>{l.toUpperCase()}</button>)}
+                  {!isDrum&&<><div style={{flex:1}}/><button onClick={()=>update('active',!sd.active)} style={{...pill(sd.active,'#34d399'),padding:'2px 8px',fontSize:'8px',fontWeight:900}}>{sd.active?'● CUSTOM':'○ PRESET'}</button></>}
                 </div>
-                {!sd.active&&<div style={{fontSize:'7px',color:'#334155',padding:'5px',textAlign:'center',borderRadius:'4px',background:'rgba(255,255,255,0.02)',border:`1px solid ${BD}`}}>Attiva CUSTOM per usare il tuo suono al posto del preset</div>}
-                <div style={{opacity:sd.active?1:0.4,pointerEvents:sd.active?'all':'none',display:'flex',flexDirection:'column',gap:'4px'}}>
-                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase'}}>OSCILLATORI</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px'}}>
-                    <div>
-                      <div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 1</div>
-                      <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
-                        {oscTypes.map(w=><button key={w} onClick={()=>update('osc',w)} style={{...pill(sd.osc===w,lc),padding:'1px 4px',fontSize:'6.5px'}}>{w.slice(0,3)}</button>)}
-                      </div>
+
+                {isDrum&&<div style={{display:'flex',flexDirection:'column',gap:'4px'}}>
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase'}}>KICK</div>
+                  <Slider label="Kick Freq (Hz)" value={ds.kickFreq||108} setValue={v=>setSoundDesign(prev=>({...prev,drum:{...prev.drum,kickFreq:v}}))} min={40} max={220} step={1} fmt={v=>`${Math.round(v)}Hz`} color='#f87171'/>
+                  <Slider label="Pitch End (Hz)" value={ds.kickEnd||40} setValue={v=>setSoundDesign(prev=>({...prev,drum:{...prev.drum,kickEnd:v}}))} min={20} max={120} step={1} fmt={v=>`${Math.round(v)}Hz`} color='#f87171'/>
+                  <Slider label="Env Time" value={ds.pitchEnvTime||0.12} setValue={v=>setSoundDesign(prev=>({...prev,drum:{...prev.drum,pitchEnvTime:v}}))} min={0.02} max={0.6} step={0.01} fmt={v=>`${Math.round(v*1000)}ms`} color='#f87171'/>
+                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'4px'}}>NOISE COLOR</div>
+                  <div style={{display:'flex',gap:'3px'}}>
+                    {['white','pink','brown'].map(c=><button key={c} onClick={()=>setSoundDesign(prev=>({...prev,drum:{...prev.drum,noiseColor:c}}))} style={{...pill((ds.noiseColor||'white')===c,'#fbbf24'),padding:'2px 8px',fontSize:'8px'}}>{c}</button>)}
+                  </div>
+                  <div style={{fontSize:'6.5px',color:'#334155',lineHeight:1.5,marginTop:'2px'}}>White = bright snare/hat · Pink = warmer · Brown = deep/muddy</div>
+                </div>}
+
+                {!isDrum&&<>
+                  {!sd.active&&<div style={{fontSize:'7px',color:'#334155',padding:'5px',textAlign:'center',borderRadius:'4px',background:'rgba(255,255,255,0.02)',border:`1px solid ${BD}`}}>Attiva CUSTOM per usare il tuo suono al posto del preset</div>}
+                  <div style={{opacity:sd.active?1:0.4,pointerEvents:sd.active?'all':'none',display:'flex',flexDirection:'column',gap:'4px'}}>
+                    <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase'}}>OSCILLATORI</div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px'}}>
+                      <div><div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 1</div><div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>{oscTypes.map(w=><button key={w} onClick={()=>update('osc',w)} style={{...pill(sd.osc===w,lc),padding:'1px 4px',fontSize:'6.5px'}}>{w.slice(0,3)}</button>)}</div></div>
+                      <div><div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 2</div><div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>{oscTypes.map(w=><button key={w} onClick={()=>update('osc2',w)} style={{...pill(sd.osc2===w,lc),padding:'1px 4px',fontSize:'6.5px'}}>{w.slice(0,3)}</button>)}</div></div>
                     </div>
-                    <div>
-                      <div style={{fontSize:'6px',color:'#334155',marginBottom:'2px',fontWeight:700}}>OSC 2</div>
-                      <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
-                        {oscTypes.map(w=><button key={w} onClick={()=>update('osc2',w)} style={{...pill(sd.osc2===w,lc),padding:'1px 4px',fontSize:'6.5px'}}>{w.slice(0,3)}</button>)}
-                      </div>
+                    <Slider label="Detune (cents)" value={sd.detune} setValue={v=>update('detune',v)} min={0} max={50} step={1} fmt={v=>`${v}¢`} color={lc}/>
+                    {sdLane==='bass'&&<><Slider label="Sub Mix" value={sd.sub??0.5} setValue={v=>update('sub',v)} color={lc}/><Slider label="Glide (s)" value={sd.glide||0} setValue={v=>update('glide',v)} min={0} max={0.5} step={0.01} fmt={v=>v===0?'off':`${Math.round(v*1000)}ms`} color={lc}/></>}
+                    <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>FILTRO</div>
+                    <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>{filterTypes.map(f=><button key={f} onClick={()=>update('filterType',f)} style={{...pill(sd.filterType===f,lc),padding:'1px 4px',fontSize:'6.5px'}}>{f.slice(0,2).toUpperCase()}</button>)}</div>
+                    <Slider label="Cutoff" value={sd.cutoff} setValue={v=>update('cutoff',v)} color={lc}/>
+                    <Slider label="Resonance" value={sd.res} setValue={v=>update('res',v)} color={lc}/>
+                    <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>ENVELOPE ADSR</div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px'}}>
+                      <Slider label="Attack" value={sd.atk} setValue={v=>update('atk',v)} min={0.001} max={2} step={0.001} fmt={v=>v<0.1?`${Math.round(v*1000)}ms`:`${v.toFixed(2)}s`} color={lc}/>
+                      <Slider label="Decay" value={sd.dec} setValue={v=>update('dec',v)} min={0.01} max={3} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
+                      <Slider label="Sustain" value={sd.sus} setValue={v=>update('sus',v)} fmt={v=>`${Math.round(v*100)}%`} color={lc}/>
+                      <Slider label="Release" value={sd.rel} setValue={v=>update('rel',v)} min={0.01} max={6} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
                     </div>
+                    <Slider label="Drive" value={sd.drive} setValue={v=>update('drive',v)} color={lc}/>
+                    {sdLane==='synth'&&<><Slider label="LFO Cutoff" value={sd.lfo||0} setValue={v=>update('lfo',v)} color={lc}/><Slider label="LFO Rate (Hz)" value={sd.lfoRate||3} setValue={v=>update('lfoRate',v)} min={0.1} max={20} step={0.1} fmt={v=>`${v.toFixed(1)}Hz`} color={lc}/></>}
+                    <button onClick={()=>{initAudio().then(()=>{const t=(audioRef.current?.ctx.currentTime||0)+0.01;if(sdLane==='bass')playBassAt(bassPreset,'C2',0.85,t,4);else playSynthAt(synthPreset,'C4',0.85,t,4);});}}
+                      style={{...pill(false,lc),padding:'6px',textAlign:'center',fontSize:'9px',fontWeight:900,marginTop:'2px'}}>▶ Ascolta {sdLane}</button>
                   </div>
-                  <Slider label="Detune (cents)" value={sd.detune} setValue={v=>update('detune',v)} min={0} max={50} step={1} fmt={v=>`${v}¢`} color={lc}/>
-                  {sdLane==='bass'&&<Slider label="Sub Mix" value={sd.sub??0.5} setValue={v=>update('sub',v)} color={lc}/>}
-                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>FILTRO</div>
-                  <div style={{display:'flex',gap:'2px',flexWrap:'wrap'}}>
-                    {filterTypes.map(f=><button key={f} onClick={()=>update('filterType',f)} style={{...pill(sd.filterType===f,lc),padding:'1px 4px',fontSize:'6.5px'}}>{f.slice(0,2).toUpperCase()}</button>)}
-                  </div>
-                  <Slider label="Cutoff" value={sd.cutoff} setValue={v=>update('cutoff',v)} color={lc}/>
-                  <Slider label="Resonance" value={sd.res} setValue={v=>update('res',v)} color={lc}/>
-                  <div style={{fontSize:'7px',color:'#2d3d4d',fontWeight:800,letterSpacing:'0.14em',textTransform:'uppercase',marginTop:'2px'}}>ENVELOPE ADSR</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px'}}>
-                    <Slider label="Attack" value={sd.atk} setValue={v=>update('atk',v)} min={0.001} max={2} step={0.001} fmt={v=>v<0.1?`${Math.round(v*1000)}ms`:`${v.toFixed(2)}s`} color={lc}/>
-                    <Slider label="Decay" value={sd.dec} setValue={v=>update('dec',v)} min={0.01} max={3} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
-                    <Slider label="Sustain" value={sd.sus} setValue={v=>update('sus',v)} fmt={v=>`${Math.round(v*100)}%`} color={lc}/>
-                    <Slider label="Release" value={sd.rel} setValue={v=>update('rel',v)} min={0.01} max={6} step={0.01} fmt={v=>`${v.toFixed(2)}s`} color={lc}/>
-                  </div>
-                  <Slider label="Drive" value={sd.drive} setValue={v=>update('drive',v)} color={lc}/>
-                  {sdLane==='synth'&&<>
-                    <Slider label="LFO Cutoff" value={sd.lfo||0} setValue={v=>update('lfo',v)} color={lc}/>
-                    <Slider label="LFO Rate (Hz)" value={sd.lfoRate||3} setValue={v=>update('lfoRate',v)} min={0.1} max={20} step={0.1} fmt={v=>`${v.toFixed(1)}Hz`} color={lc}/>
-                  </>}
-                  <button onClick={()=>{initAudio().then(()=>{const t=(audioRef.current?.ctx.currentTime||0)+0.01;if(sdLane==='bass')playBassAt(bassPreset,'C2',0.85,t,4);else playSynthAt(synthPreset,'C4',0.85,t,4);});}}
-                    style={{...pill(false,lc),padding:'6px',textAlign:'center',fontSize:'9px',fontWeight:900,marginTop:'2px'}}>
-                    ▶ Ascolta {sdLane}
-                  </button>
-                </div>
+                </>}
               </>);
             })()}
 
