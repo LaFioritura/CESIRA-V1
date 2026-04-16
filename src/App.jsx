@@ -489,6 +489,9 @@ export default function CesiraV1(){
   const [iterCount,setIterCount]=useState(0);
   const [arpeMode,setArpeMode]=useState('up');
   const [currentSeed,setCurrentSeed]=useState(null); // tracks active CompositionSeed for AutoJam
+  const [autoPilotOn,setAutoPilotOn]=useState(false);
+  const [autoPilotBars,setAutoPilotBars]=useState(4);
+  const [autoPilotStrength,setAutoPilotStrength]=useState(0.58);
   const [laneVU,setLaneVU]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
@@ -519,6 +522,9 @@ export default function CesiraV1(){
   const humanizeRef=useRef(humanize),stutterOnRef=useRef(stutterOn),stutterBurstRef=useRef(stutterBurst),laneVolumesRef=useRef(laneVolumes);
   const drumPresetRef=useRef(drumPreset),bassPresetRef=useRef(bassPreset),synthPresetRef=useRef(synthPreset);
   const bassWaveRef=useRef(bassWave),synthWaveRef=useRef(synthWave),fmIndexRef=useRef(fmIndex);
+  const densityRef=useRef(density),chaosRef=useRef(chaos),currentSeedRef=useRef(currentSeed),iterCountRef=useRef(iterCount);
+  const autoPilotOnRef=useRef(autoPilotOn),autoPilotBarsRef=useRef(autoPilotBars),autoPilotStrengthRef=useRef(autoPilotStrength);
+  const transportTickRef=useRef(0),lastAutoPilotTickRef=useRef(-1),jamCycleRef=useRef(null);
   const midiRef=useRef(null);const importInputRef=useRef(null);const laneGainNodes=useRef({});
   const vuTimers=useRef({});
 
@@ -537,6 +543,8 @@ export default function CesiraV1(){
   useEffect(()=>{drumPresetRef.current=drumPreset;},[drumPreset]);useEffect(()=>{bassPresetRef.current=bassPreset;},[bassPreset]);useEffect(()=>{synthPresetRef.current=synthPreset;},[synthPreset]);
   useEffect(()=>{soundDesignRef.current=soundDesign;},[soundDesign]);
   useEffect(()=>{bassWaveRef.current=bassWave;},[bassWave]);useEffect(()=>{synthWaveRef.current=synthWave;},[synthWave]);useEffect(()=>{fmIndexRef.current=fmIndex;},[fmIndex]);
+  useEffect(()=>{densityRef.current=density;},[density]);useEffect(()=>{chaosRef.current=chaos;},[chaos]);useEffect(()=>{currentSeedRef.current=currentSeed;},[currentSeed]);useEffect(()=>{iterCountRef.current=iterCount;},[iterCount]);
+  useEffect(()=>{autoPilotOnRef.current=autoPilotOn;},[autoPilotOn]);useEffect(()=>{autoPilotBarsRef.current=autoPilotBars;},[autoPilotBars]);useEffect(()=>{autoPilotStrengthRef.current=autoPilotStrength;},[autoPilotStrength]);
   useEffect(()=>{recordingsRef.current=recordings;},[recordings]);
   useEffect(()=>{LANE_KEYS.forEach(lane=>{const node=laneGainNodes.current[lane];if(node&&audioRef.current)node.gain.setTargetAtTime(laneVolumes[lane],audioRef.current.ctx.currentTime,0.02);});},[laneVolumes]);
 
@@ -1060,10 +1068,16 @@ export default function CesiraV1(){
       window.setTimeout(()=>{setStep(si);setPage(Math.floor(si/PAGE_SIZE));},delay);
       nextNoteTimeRef.current+=stepInterval(si);
       currentStepRef.current=(si+1)%stepCountRef.current;
+      transportTickRef.current+=1;
+      const triggerEvery=Math.max(16,autoPilotBarsRef.current*16);
+      if(autoPilotOnRef.current&&transportTickRef.current>0&&transportTickRef.current%triggerEvery===0&&lastAutoPilotTickRef.current!==transportTickRef.current){
+        lastAutoPilotTickRef.current=transportTickRef.current;
+        window.setTimeout(()=>{ if(jamCycleRef.current&&isPlayingRef.current) jamCycleRef.current({fromAutoPilot:true}); },0);
+      }
     }
   };
 
-  const startClock=()=>{const audio=audioRef.current;if(!audio)return;nextNoteTimeRef.current=audio.ctx.currentTime+0.06;currentStepRef.current=0;isPlayingRef.current=true;schedulerRef.current=setInterval(runScheduler,LOOKAHEAD_MS);};
+  const startClock=()=>{const audio=audioRef.current;if(!audio)return;nextNoteTimeRef.current=audio.ctx.currentTime+0.06;currentStepRef.current=0;transportTickRef.current=0;lastAutoPilotTickRef.current=-1;isPlayingRef.current=true;schedulerRef.current=setInterval(runScheduler,LOOKAHEAD_MS);};
   const stopClock=()=>{if(schedulerRef.current){clearInterval(schedulerRef.current);schedulerRef.current=null;}isPlayingRef.current=false;setIsPlaying(false);setStep(0);};
 
   const togglePlay=async()=>{
@@ -1112,46 +1126,48 @@ export default function CesiraV1(){
   // Transformation types AutoJam cycles through with musical logic
   const TRANSFORM_SEQUENCE=['mutateRhythm','accentShift','subtract','intensify','reharmonize','rotate','thinOut','timbreOpen','recallCore','mutateRhythm'];
 
-  const autoJam=()=>{
-    // If we have an active seed, apply a targeted transformation (preserves identity)
-    // After every 3 transforms, regenerate a new seed for variety
-    const shouldRegenerate=!currentSeed||iterCount%4===0;
+  jamCycleRef.current=(opts={})=>{
+    const fromAutoPilot=!!opts.fromAutoPilot;
+    const densityNow=densityRef.current, chaosNow=chaosRef.current, seedNow=currentSeedRef.current, iterNow=iterCountRef.current;
+    const strength=fromAutoPilot?autoPilotStrengthRef.current:1;
+    const shouldRegenerate=!seedNow||iterNow%4===0||opts.forceRegenerate;
     if(shouldRegenerate){
-      // Regenerate with gradual density/chaos evolution
-      const newDensity=clamp(density+(Math.random()-0.4)*0.18,0.1,0.95);
-      const newChaos=clamp(chaos+(Math.random()-0.4)*0.14,0,1);
-      const fs=buildFreestylePattern(stepCount,laneStepCounts,newDensity,newChaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
-      pushUndo(patterns);
+      const phaseSections=['intro','build','groove','drop','break','groove','fill','outro'];
+      const targetSection=fromAutoPilot?phaseSections[Math.floor(iterNow/2)%phaseSections.length]:undefined;
+      const newDensity=clamp(densityNow+(Math.random()-0.4)*0.18*strength,0.1,0.95);
+      const newChaos=clamp(chaosNow+(Math.random()-0.4)*0.14*strength,0,1);
+      const fs=buildFreestylePattern(stepCountRef.current,laneStepCountsRef.current,newDensity,newChaos,{drumPreset:drumPresetRef.current,bassPreset:bassPresetRef.current,synthPreset:synthPresetRef.current},{autoLength:true,iterCount:iterNow,sectionType:targetSection,mood:seedNow?.moodName});
+      pushUndo(patternsRef.current);
       setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
       setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
       setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);
       setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
       setDensity(newDensity);setChaos(newChaos);
+      setStatusText(`${fromAutoPilot?'Auto Pilot':'Auto Jam'} #${iterNow+1} · new seed`);
     } else {
-      // Apply targeted transformation — keeps musical identity, varies the texture
-      const transformType=TRANSFORM_SEQUENCE[iterCount%TRANSFORM_SEQUENCE.length];
-      const result=applyTransformation(patterns,bassLine,synthLine,currentSeed,laneStepCounts,transformType);
-      pushUndo(patterns);
+      const transformType=TRANSFORM_SEQUENCE[iterNow%TRANSFORM_SEQUENCE.length];
+      const result=applyTransformation(patternsRef.current,bassLineRef.current,synthLineRef.current,seedNow,laneStepCountsRef.current,transformType);
+      pushUndo(patternsRef.current);
       setPatterns(result.patterns);setBassLine(result.bassLine);setSynthLine(result.synthLine);
-      setStatusText(`Transform: ${transformType} · ${currentSeed.moodName} · ${currentSeed.sectionType}`);
+      setStatusText(`${fromAutoPilot?'Auto Pilot':'Transform'}: ${transformType} · ${seedNow.moodName} · ${seedNow.sectionType}`);
     }
-    // Gradual timbric evolution regardless of mode
-    setTone(clamp(tone+(Math.random()-0.5)*0.18,0.1,1));
-    setNoise(clamp(noise+(Math.random()-0.5)*0.15,0,1));
-    setSpace(clamp(space+(Math.random()-0.5)*0.16,0,1));
-    setSwing(clamp(swing+(Math.random()-0.5)*0.05,0,0.25));
-    setBassCutoff(clamp(bassCutoff+(Math.random()-0.5)*0.22,0,1));
-    setSynthCutoff(clamp(synthCutoff+(Math.random()-0.5)*0.2,0,1));
+    setTone(v=>clamp(v+(Math.random()-0.5)*0.18*strength,0.1,1));
+    setNoise(v=>clamp(v+(Math.random()-0.5)*0.15*strength,0,1));
+    setSpace(v=>clamp(v+(Math.random()-0.5)*0.16*strength,0,1));
+    setSwing(v=>clamp(v+(Math.random()-0.5)*0.05*strength,0,0.25));
+    setBassCutoff(v=>clamp(v+(Math.random()-0.5)*0.22*strength,0,1));
+    setSynthCutoff(v=>clamp(v+(Math.random()-0.5)*0.2*strength,0,1));
     setLaneFx(prev=>({
-      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.1,0,0.8),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.12,0,1)},
-      snare:{...prev.snare,echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.07,0,1)},
-      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.12,0,1)},
-      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.08,0,0.8),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.12,0,1)},
-      synth:{...prev.synth,echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.09,0,1)},
+      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.1*strength,0,0.8),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.12*strength,0,1)},
+      snare:{...prev.snare,echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.07*strength,0,1)},
+      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.12*strength,0,1)},
+      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.08*strength,0,0.8),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.12*strength,0,1)},
+      synth:{...prev.synth,echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.09*strength,0,1)},
     }));
     setIterCount(c=>c+1);
-    if(shouldRegenerate)setStatusText(`Auto Jam #${iterCount+1} · new seed`);
   };
+
+  const autoJam=()=>{ if(jamCycleRef.current) jamCycleRef.current({fromAutoPilot:false}); };
   const triggerStutter=async()=>{await initAudio();const audio=audioRef.current;if(!audio)return;const b=Math.max(2,stutterBurst),t=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCounts[activeLane]||stepCount);for(let i=0;i<b;i++){const st=t+i*0.048;if(activeLane==='kick')playDrumAt(Math.min(drumPreset,1),i===0?1:0.7,st);else if(activeLane==='snare')playDrumAt(drumPreset<2?2:3,i===0?1:0.7,st);else if(activeLane==='hat')playDrumAt(drumPreset<4?4:5,i===0?1:0.7,st);else if(activeLane==='bass')playBassAt(bassPreset,bassLine[li]||'C2',i===0?1:0.7,st);else if(activeLane==='synth')playSynthAt(synthPreset,synthLine[li]||'C4',i===0?1:0.7,st);}flashLane(activeLane,1);setStatusText(`${activeLane.toUpperCase()} stutter x${b}.`);};
 
   const fillLane=(lane,amount)=>{pushUndo(patterns);setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<laneStepCounts[lane];i++){n[lane][i]={...n[lane][i],on:Math.random()<amount,prob:clamp(0.6+Math.random()*0.4,0.5,1),vel:clamp(0.5+Math.random()*0.5,0.4,1)};}return n;});};
@@ -1169,13 +1185,13 @@ export default function CesiraV1(){
   const tapTempo=()=>{const now=Date.now();setTapTimes(prev=>{const next=[...prev.filter(t=>now-t<3000),now];if(next.length>=2){const intervals=next.slice(1).map((t,i)=>t-next[i]);const avg=intervals.reduce((a,b)=>a+b,0)/intervals.length;const newBpm=clamp(Math.round(60000/avg),60,200);setBpm(newBpm);setStatusText(`TAP → ${newBpm} BPM`);}return next.slice(-6);});};
 
   // ─── Save/Load ────────────────────────────────────────────────────────────
-  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex,soundDesign});
+  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex,soundDesign,autoPilotOn,autoPilotBars,autoPilotStrength,currentSeed,iterCount,arpeMode});
   const applySnapshot=(snap,label='Loaded.')=>{
     if(!snap)return;stopClock();if(snap.projectName)setProjectName(snap.projectName);
     const n=(k,s)=>typeof snap[k]==='number'&&s(snap[k]),b=(k,s)=>typeof snap[k]==='boolean'&&s(snap[k]);
     n('bpm',setBpm);n('swing',setSwing);n('density',setDensity);n('chaos',setChaos);n('tone',setTone);n('noise',setNoise);n('space',setSpace);n('master',setMaster);n('compressAmount',setCompressAmount);n('resonance',setResonance);n('bassLfo',setBassLfo);n('synthLfo',setSynthLfo);n('drumDecay',setDrumDecay);n('bassCutoff',setBassCutoff);n('synthCutoff',setSynthCutoff);n('bassSubAmount',setBassSubAmount);n('synthAttack',setSynthAttack);n('synthRelease',setSynthRelease);n('stutterBurst',setStutterBurst);n('macroKnob',setMacroKnob);n('grooveAmount',setGrooveAmount);n('metronomeLevel',setMetronomeLevel);n('drumPreset',setDrumPreset);n('bassPreset',setBassPreset);n('synthPreset',setSynthPreset);n('fxPreset',setFxPreset);n('fmIndex',setFmIndex);
     b('stutterOn',setStutterOn);b('metronomeOn',setMetronomeOn);
-    if(snap.harmonicProfile)setHarmonicProfile(snap.harmonicProfile);if(snap.grooveProfile)setGrooveProfile(snap.grooveProfile);if(snap.sectionProfile)setSectionProfile(snap.sectionProfile);if(snap.bassWave)setBassWave(snap.bassWave);if(snap.synthWave)setSynthWave(snap.synthWave);
+    if(snap.harmonicProfile)setHarmonicProfile(snap.harmonicProfile);if(snap.grooveProfile)setGrooveProfile(snap.grooveProfile);if(snap.sectionProfile)setSectionProfile(snap.sectionProfile);if(snap.bassWave)setBassWave(snap.bassWave);if(snap.synthWave)setSynthWave(snap.synthWave);if(typeof snap.autoPilotOn==='boolean')setAutoPilotOn(snap.autoPilotOn);if(typeof snap.autoPilotBars==='number')setAutoPilotBars(snap.autoPilotBars);if(typeof snap.autoPilotStrength==='number')setAutoPilotStrength(snap.autoPilotStrength);if(snap.currentSeed)setCurrentSeed(snap.currentSeed);if(typeof snap.iterCount==='number')setIterCount(snap.iterCount);if(snap.arpeMode)setArpeMode(snap.arpeMode);
     if(snap.laneStepCounts)setLaneStepCounts(snap.laneStepCounts);if(snap.patterns)setPatterns(snap.patterns);if(snap.bassLine)setBassLine(snap.bassLine);if(snap.synthLine)setSynthLine(snap.synthLine);if(snap.laneFx)setLaneFx(snap.laneFx);if(snap.laneVolumes)setLaneVolumes(snap.laneVolumes);
     if(snap.soundDesign)setSoundDesign(snap.soundDesign);
     setStatusText(label);
@@ -1208,7 +1224,11 @@ export default function CesiraV1(){
         <input value={projectName} onChange={e=>setProjectName(e.target.value)} style={{width:'100px',background:B1,border:`1px solid ${BD}`,borderRadius:'5px',padding:'2px 6px',fontSize:'10px',fontWeight:700,color:'#fff',outline:'none'}}/>
         <button onClick={togglePlay} style={{padding:'3px 14px',borderRadius:'6px',border:'none',background:isPlaying?'#f43f5e':'#34d399',color:isPlaying?'#fff':'#0a1628',fontWeight:900,fontSize:'10px',cursor:'pointer',letterSpacing:'0.08em',flexShrink:0,transition:'background 0.12s'}}>{isPlaying?'■ STOP':'▶ PLAY'}</button>
         <button onClick={randomize} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Freestyle</button>
-        <button onClick={autoJam} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Auto Jam</button>
+        <button onClick={autoJam} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Auto Jam</button><button onClick={()=>setAutoPilotOn(v=>!v)} style={{...pill(autoPilotOn),padding:'3px 8px',fontSize:'9px'}}>{autoPilotOn?'Pilot On':'Pilot Off'}</button>
+        <select value={autoPilotBars} onChange={e=>setAutoPilotBars(Number(e.target.value))} style={{background:B1,border:`1px solid ${BD}`,borderRadius:'4px',padding:'2px 4px',fontSize:'9px',fontWeight:800,color:'#cbd5e1',outline:'none'}}>
+          {[1,2,4,8].map(n=><option key={n} value={n}>{n} bar</option>)}
+        </select>
+        <input type='range' min={0.2} max={1} step={0.01} value={autoPilotStrength} onChange={e=>setAutoPilotStrength(Number(e.target.value))} style={{width:'56px',accentColor:'#34d399'}} title='Pilot strength'/>
         <button onClick={recState==='recording'?stopRecording:startRecording} style={{...pill(recState==='recording','#f43f5e'),padding:'3px 8px',fontSize:'9px'}}>{recState==='recording'?'■ Rec':'⏺ Rec'}</button>
         <button onClick={undo} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>↩</button>
         <button onClick={redo} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>↪</button>
