@@ -86,31 +86,29 @@ const MODES={
   mixo:    {bass:['C2','D2','E2','F2','G2','A2','Bb2','C3','D3','E3'],synth:['C4','D4','E4','F4','G4','A4','Bb4','C5','D5','E5']},
   lydian:  {bass:['C2','D2','E2','F#2','G2','A2','B2','C3','D3','E3'],synth:['C4','D4','E4','F#4','G4','A4','B4','C5','D5','E5']},
 };
-
-// Chord functions — each chord picks notes from mode scale degrees
-const CHORD_PROGRESSIONS = {
-  minor: [
-    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i–VI–iv–v
-    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2},{root:0,third:2,fifth:4}], // i–iv–v–i
-    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:6,third:1,fifth:3},{root:4,third:0,fifth:2}], // i–VI–VII–v
-    [{root:0,third:2,fifth:4},{root:2,third:4,fifth:6},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}], // i–III–iv–v
-    [{root:0,third:2,fifth:4},{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:3,third:5,fifth:0}], // i–i–iv–iv (hypnotic)
-    [{root:0,third:2,fifth:4},{root:4,third:0,fifth:2},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3}], // i–v–iv–VII
+const CHORD_PROGRESSIONS={
+  minor:[
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}],
+    [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2},{root:0,third:2,fifth:4}],
+    [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:6,third:1,fifth:3},{root:4,third:0,fifth:2}],
+    [{root:0,third:2,fifth:4},{root:2,third:4,fifth:6},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}],
+    [{root:0,third:2,fifth:4},{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:3,third:5,fifth:0}],
+    [{root:0,third:2,fifth:4},{root:4,third:0,fifth:2},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3}],
   ],
   phrygian:[
     [{root:0,third:1,fifth:3},{root:1,third:3,fifth:5},{root:3,third:5,fifth:0},{root:1,third:3,fifth:5}],
     [{root:0,third:1,fifth:3},{root:6,third:1,fifth:3},{root:3,third:5,fifth:0},{root:0,third:1,fifth:3}],
-    [{root:0,third:1,fifth:3},{root:0,third:1,fifth:3},{root:1,third:3,fifth:5},{root:1,third:3,fifth:5}], // static phrygian drone
+    [{root:0,third:1,fifth:3},{root:0,third:1,fifth:3},{root:1,third:3,fifth:5},{root:1,third:3,fifth:5}],
   ],
   dorian:[
     [{root:0,third:2,fifth:4},{root:5,third:0,fifth:2},{root:3,third:5,fifth:0},{root:4,third:0,fifth:2}],
     [{root:0,third:2,fifth:4},{root:1,third:3,fifth:5},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3}],
-    [{root:0,third:2,fifth:4},{root:4,third:6,fifth:1},{root:3,third:5,fifth:0},{root:0,third:2,fifth:4}], // dorian vamp
+    [{root:0,third:2,fifth:4},{root:4,third:6,fifth:1},{root:3,third:5,fifth:0},{root:0,third:2,fifth:4}],
   ],
   mixo:[
     [{root:0,third:2,fifth:4},{root:6,third:1,fifth:3},{root:4,third:6,fifth:1},{root:0,third:2,fifth:4}],
     [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:6,third:1,fifth:3},{root:4,third:6,fifth:1}],
-    [{root:0,third:2,fifth:4},{root:0,third:2,fifth:4},{root:6,third:1,fifth:3},{root:6,third:1,fifth:3}], // mixo shuffle
+    [{root:0,third:2,fifth:4},{root:0,third:2,fifth:4},{root:6,third:1,fifth:3},{root:6,third:1,fifth:3}],
   ],
   lydian:[
     [{root:0,third:2,fifth:4},{root:3,third:5,fifth:0},{root:4,third:6,fifth:1},{root:2,third:4,fifth:6}],
@@ -118,233 +116,36 @@ const CHORD_PROGRESSIONS = {
   ],
   chroma:[
     [{root:0,third:1,fifth:4},{root:3,third:6,fifth:1},{root:7,third:2,fifth:5},{root:4,third:9,fifth:2}],
-    [{root:0,third:3,fifth:6},{root:1,third:4,fifth:7},{root:2,third:5,fifth:8},{root:0,third:3,fifth:6}], // chromatic sequence
+    [{root:0,third:3,fifth:6},{root:1,third:4,fifth:7},{root:2,third:5,fifth:8},{root:0,third:3,fifth:6}],
   ],
 };
-
-// Section archetypes — musical character of each part
-const SECTION_ARCHETYPES = {
-  intro:    {kickMult:0.4,snareMult:0.3,hatMult:0.5,bassMult:0.6,synthMult:0.7,velCurve:'rise',probFloor:0.5,lenBias:2.5},
-  build:    {kickMult:0.8,snareMult:0.7,hatMult:1.1,bassMult:1.0,synthMult:0.8,velCurve:'rise',probFloor:0.65,lenBias:1.5},
-  drop:     {kickMult:1.3,snareMult:1.1,hatMult:0.9,bassMult:1.2,synthMult:0.8,velCurve:'accent',probFloor:0.82,lenBias:1},
-  groove:   {kickMult:1.0,snareMult:1.0,hatMult:1.0,bassMult:1.0,synthMult:0.9,velCurve:'groove',probFloor:0.72,lenBias:1.2},
-  break:    {kickMult:0.2,snareMult:0.4,hatMult:0.3,bassMult:0.5,synthMult:1.4,velCurve:'flat',probFloor:0.45,lenBias:4},
-  outro:    {kickMult:0.5,snareMult:0.4,hatMult:0.4,bassMult:0.4,synthMult:0.5,velCurve:'fall',probFloor:0.4,lenBias:2.5},
-  tension:  {kickMult:0.6,snareMult:0.8,hatMult:1.3,bassMult:1.1,synthMult:1.2,velCurve:'accent',probFloor:0.6,lenBias:1.5}, // sparse kick, lots of hat
-  fill:     {kickMult:1.5,snareMult:1.4,hatMult:0.7,bassMult:0.8,synthMult:0.5,velCurve:'accent',probFloor:0.7,lenBias:0.75}, // dense drums, short notes
+const SECTION_ARCHETYPES={
+  intro:  {kickMult:0.4,snareMult:0.3,hatMult:0.5,bassMult:0.6,synthMult:0.7,velCurve:'rise',probFloor:0.5,lenBias:2.5},
+  build:  {kickMult:0.8,snareMult:0.7,hatMult:1.1,bassMult:1.0,synthMult:0.8,velCurve:'rise',probFloor:0.65,lenBias:1.5},
+  drop:   {kickMult:1.3,snareMult:1.1,hatMult:0.9,bassMult:1.2,synthMult:0.8,velCurve:'accent',probFloor:0.82,lenBias:1},
+  groove: {kickMult:1.0,snareMult:1.0,hatMult:1.0,bassMult:1.0,synthMult:0.9,velCurve:'groove',probFloor:0.72,lenBias:1.2},
+  break:  {kickMult:0.2,snareMult:0.4,hatMult:0.3,bassMult:0.5,synthMult:1.4,velCurve:'flat',probFloor:0.45,lenBias:4},
+  outro:  {kickMult:0.5,snareMult:0.4,hatMult:0.4,bassMult:0.4,synthMult:0.5,velCurve:'fall',probFloor:0.4,lenBias:2.5},
+  tension:{kickMult:0.6,snareMult:0.8,hatMult:1.3,bassMult:1.1,synthMult:1.2,velCurve:'accent',probFloor:0.6,lenBias:1.5},
+  fill:   {kickMult:1.5,snareMult:1.4,hatMult:0.7,bassMult:0.8,synthMult:0.5,velCurve:'accent',probFloor:0.7,lenBias:0.75},
 };
-
-// Voice leading: move by smallest interval in scale
-function voiceLead(currentNote, pool, direction='any'){
-  if(!pool.length)return currentNote;
-  const idx=pool.indexOf(currentNote);
-  if(idx===-1)return pool[Math.floor(Math.random()*pool.length)];
-  if(direction==='up')return pool[Math.min(idx+1,pool.length-1)];
-  if(direction==='down')return pool[Math.max(idx-1,0)];
-  // 'any': prefer step motion, allow occasional leap
-  const r=Math.random();
-  if(r<0.55)return pool[Math.min(idx+1,pool.length-1)];
-  if(r<0.8)return pool[Math.max(idx-1,0)];
-  return pool[clamp(idx+(Math.random()<0.5?2:-2),0,pool.length-1)];
-}
-
-// Velocity curves for different section archetypes
-function velCurve(type, stepIdx, totalSteps, phraseWeight){
-  const t=stepIdx/totalSteps;
-  switch(type){
-    case'rise':  return clamp(0.35+t*0.65*phraseWeight,0.2,1);
-    case'fall':  return clamp(0.95-t*0.55,0.2,1);
-    case'accent':return stepIdx%4===0?clamp(0.9+phraseWeight*0.1,0.7,1):clamp(0.55+phraseWeight*0.3,0.3,0.85);
-    case'groove':return stepIdx%8===0?0.95:stepIdx%4===0?0.78:stepIdx%2===0?0.62:0.45+Math.random()*0.2;
-    case'flat':  return clamp(0.6+phraseWeight*0.2,0.4,0.85);
-    default:     return clamp(0.5+phraseWeight*0.5,0.3,1);
-  }
-}
-
-// Arpeggio patterns
-function arpeggiate(notes, mode, step, total){
-  if(!notes.length)return notes[0];
-  const n=notes.length;
-  switch(mode){
-    case'up':    return notes[step%n];
-    case'down':  return notes[(n-1)-(step%n)];
-    case'updown':{const period=n*2-2;const p=step%period;return p<n?notes[p]:notes[period-p];}
-    case'random':return notes[Math.floor(Math.random()*n)];
-    case'outside':{const p=step%n;return p%2===0?notes[Math.floor(p/2)]:notes[n-1-Math.floor(p/2)];}
-    default:     return notes[step%n];
-  }
-}
-
-// Build chord notes from progression
-function chordNotes(chord, pool){
-  const len=pool.length;
-  return [
-    pool[chord.root%len],
-    pool[chord.third%len],
-    pool[chord.fifth%len],
-  ].filter(Boolean);
-}
-
-function chooseMode(chaos){
-  if(chaos>0.82)return seededChoice(['chroma','phrygian']);
-  if(chaos>0.62)return seededChoice(['minor','phrygian','dorian']);
-  if(chaos>0.42)return seededChoice(['minor','dorian','mixo']);
-  return seededChoice(['minor','mixo','lydian']);
-}
-function chooseGroove(density,chaos){
-  if(density>0.68&&chaos>0.45)return'bunker';
-  if(chaos>0.62)return'broken';
-  if(density<0.38)return'float';
-  return'steady';
-}
-function chooseSection(density,chaos,iterCount){
-  if(iterCount===0)return seededChoice(['intro','groove']);
-  if(density<0.25)return seededChoice(['break','intro','outro']);
-  if(density>0.78&&chaos>0.55)return seededChoice(['drop','drop','fill','tension']);
-  if(density>0.55&&chaos>0.4)return seededChoice(['groove','build','drop','tension']);
-  if(chaos>0.65)return seededChoice(['tension','break','groove']);
-  return seededChoice(['groove','break','build','fill']);
-}
-
-function buildNoteLanes(stepCount, modeName, grooveName, chaos, progression, arpeMode, sectionType){
-  const mode=MODES[modeName]||MODES.minor;
-  const arch=SECTION_ARCHETYPES[sectionType]||SECTION_ARCHETYPES.groove;
-  const bassPool=mode.bass;
-  const synthPool=mode.synth;
-  const bassLine=makeEmptyNotes(bassPool[0]);
-  const synthLine=makeEmptyNotes(synthPool[0]);
-  const chordLen=Math.floor(stepCount/4); // 4 chords across the pattern
-  let lastBass=bassPool[0];
-
-  for(let i=0;i<stepCount;i++){
-    const chordIdx=Math.floor(i/chordLen)%progression.length;
-    const chord=progression[chordIdx];
-    const bassChordNotes=chordNotes(chord,bassPool);
-    const synthChordNotes=chordNotes(chord,synthPool);
-
-    // Bass: voice leading within chord tones, occasional passing tone
-    const isPassingTone=Math.random()<chaos*0.15;
-    if(isPassingTone){
-      lastBass=voiceLead(lastBass,bassPool,'any');
-    } else {
-      // Move to nearest chord tone
-      const nearest=bassChordNotes.reduce((best,n)=>{
-        const bIdx=bassPool.indexOf(best),nIdx=bassPool.indexOf(n);
-        const cIdx=bassPool.indexOf(lastBass);
-        return Math.abs(nIdx-cIdx)<Math.abs(bIdx-cIdx)?n:best;
-      },bassChordNotes[0]);
-      lastBass=nearest;
-    }
-    bassLine[i]=lastBass;
-
-    // Synth: arpeggio over chord tones, with occasional chromatic colour
-    synthLine[i]=arpeggiate(synthChordNotes,arpeMode,i,stepCount);
-  }
-
-  return{bassLine,synthLine};
-}
-
-function chooseLaneLengths(density,chaos,grooveName){
-  const banks={
-    steady:[{kick:16,snare:16,hat:16,bass:32,synth:32,section:'pulse-cell'},{kick:32,snare:16,hat:32,bass:32,synth:48,section:'night-drive'},{kick:16,snare:32,hat:16,bass:48,synth:64,section:'slow-rise'}],
-    broken:[{kick:32,snare:16,hat:32,bass:32,synth:48,section:'fracture-loop'},{kick:32,snare:32,hat:48,bass:32,synth:64,section:'split-engine'},{kick:16,snare:48,hat:32,bass:48,synth:32,section:'off-axis'}],
-    bunker:[{kick:16,snare:32,hat:16,bass:32,synth:48,section:'pressure-room'},{kick:32,snare:16,hat:32,bass:16,synth:64,section:'steel-corridor'},{kick:16,snare:16,hat:48,bass:32,synth:64,section:'locked-floor'}],
-    float: [{kick:32,snare:32,hat:48,bass:32,synth:64,section:'mist-window'},{kick:16,snare:48,hat:32,bass:48,synth:64,section:'ghost-hall'},{kick:16,snare:32,hat:48,bass:32,synth:48,section:'soft-tilt'}],
-  };
-  const sel=seededChoice(banks[grooveName]||banks.steady),allowed=[16,32,48,64];
-  const snap=v=>allowed.reduce((b,c)=>Math.abs(c-v)<Math.abs(b-v)?c:b,allowed[0]),nudge=chaos>0.72?8:density>0.64?0:-4;
-  return{kick:snap(clamp(sel.kick+nudge,16,MAX_STEPS)),snare:snap(clamp(sel.snare+nudge,16,MAX_STEPS)),hat:snap(clamp(sel.hat+nudge,16,MAX_STEPS)),bass:snap(clamp(sel.bass+nudge,16,MAX_STEPS)),synth:snap(clamp(sel.synth+nudge,16,MAX_STEPS)),section:sel.section};
-}
-
-function getGrooveAccent(profile,lane,stepIndex,amount){
-  const pos=stepIndex%16;
-  const maps={
-    steady:{kick:[1.2,1,0.92,0.96,1,0.94,0.98,0.96,1.18,0.98,0.92,0.96,1.02,0.96,0.98,0.96],snare:[0.92,0.9,0.92,0.9,1.16,0.92,0.92,0.9,0.92,0.9,0.92,0.9,1.12,0.92,0.92,0.9],hat:[0.92,1.02,0.9,1.04,0.94,1.02,0.9,1.06,0.92,1.02,0.9,1.04,0.94,1.02,0.9,1.08],bass:[1.1,0.96,0.98,1.02,0.96,0.94,1,1.04,1.08,0.96,0.98,1.02,0.96,0.94,1,1.04],synth:[0.96,1,1.04,1,0.96,1,1.08,1,0.96,1,1.04,1,0.96,1,1.12,1]},
-    broken:{kick:[1.22,0.88,1.04,0.84,0.96,1.06,0.9,1.02,1.14,0.86,1.08,0.82,0.94,1.04,0.9,1.06],snare:[0.88,0.94,0.9,1,1.12,0.9,0.96,0.9,0.88,1,0.9,0.96,1.1,0.88,1,0.92],hat:[0.84,1.08,0.9,1.14,0.86,1.02,0.92,1.12,0.84,1.08,0.9,1.14,0.86,1.02,0.92,1.16],bass:[1.06,0.94,1.1,0.88,1,0.94,1.08,0.9,1.04,0.94,1.1,0.88,1,0.94,1.08,0.92],synth:[0.92,1.04,1.12,0.9,0.94,1.08,1.14,0.88,0.92,1.04,1.1,0.9,0.94,1.08,1.16,0.86]},
-    bunker:{kick:[1.28,0.92,0.94,0.9,1.02,0.92,0.94,0.9,1.24,0.92,0.94,0.9,1.04,0.92,0.94,0.9],snare:[0.9,0.9,0.92,0.9,1.08,0.9,0.92,0.9,0.9,0.9,0.92,0.9,1.06,0.9,0.92,0.9],hat:[0.88,0.98,0.9,1.02,0.88,0.98,0.9,1.04,0.88,0.98,0.9,1.02,0.88,0.98,0.9,1.06],bass:[1.16,0.94,0.96,1,1.04,0.94,0.96,1.02,1.14,0.94,0.96,1,1.06,0.94,0.96,1.04],synth:[0.9,0.98,1.02,0.96,0.9,0.98,1.06,0.96,0.9,0.98,1.02,0.96,0.9,0.98,1.1,0.96]},
-    float: {kick:[1.12,0.98,0.96,1,1.04,0.98,0.96,1,1.1,0.98,0.96,1,1.02,0.98,0.96,1],snare:[0.94,0.98,0.96,1,1.06,0.98,0.96,1,0.94,0.98,0.96,1,1.08,0.98,0.96,1],hat:[0.96,1.02,0.98,1.04,0.96,1.02,0.98,1.06,0.96,1.02,0.98,1.04,0.96,1.02,0.98,1.08],bass:[1.04,0.98,1,1.02,1.04,0.98,1,1.04,1.02,0.98,1,1.02,1.06,0.98,1,1.04],synth:[1,1.04,1.08,1.02,1,1.04,1.1,1.02,1,1.04,1.08,1.02,1,1.04,1.12,1.02]},
-  };
-  const table=(maps[profile]||maps.steady)[lane]||maps.steady.kick;return 1+(table[pos]||1-1)*clamp(amount,0,1);
-}
-
-// Main generative function — now musically aware
-function buildFreestylePattern(stepCount,laneStepCounts,density,chaos,currentPresets,options={}){
-  const grooveName=chooseGroove(density,chaos);
-  const modeName=chooseMode(chaos);
-  const sectionType=options.sectionType||chooseSection(density,chaos,options.iterCount||0);
-  const arch=SECTION_ARCHETYPES[sectionType]||SECTION_ARCHETYPES.groove;
-  const arpeMode=seededChoice(['up','down','updown','random','outside']);
-  const autoLength=options.autoLength??true;
-  const gl=autoLength?chooseLaneLengths(density,chaos,grooveName):{...laneStepCounts,section:'manual-grid'};
-  const ell={kick:gl.kick||laneStepCounts.kick||stepCount,snare:gl.snare||laneStepCounts.snare||stepCount,hat:gl.hat||laneStepCounts.hat||stepCount,bass:gl.bass||laneStepCounts.bass||stepCount,synth:gl.synth||laneStepCounts.synth||stepCount};
-  const masterLength=Math.max(...Object.values(ell));
-
-  // Pick a chord progression for this mode
-  const progPool=CHORD_PROGRESSIONS[modeName]||CHORD_PROGRESSIONS.minor;
-  const progression=seededChoice(progPool);
-
-  const{bassLine,synthLine}=buildNoteLanes(masterLength,modeName,grooveName,chaos,progression,arpeMode,sectionType);
-
-  const p={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};
-  const groove=GROOVE_MAP[grooveName];
-  const bar=16;
-  const phraseShape=seededChoice(['anchor','stagger','mirror','fall','wave']);
-
-  for(const lane of LANE_KEYS){
-    const ll=ell[lane]||masterLength;
-    const laneMult=arch[lane+'Mult']??1;
-    for(let i=0;i<ll;i++){
-      const pos=i%bar,strong=pos===0||pos===8,backbeat=pos===4||pos===12,offbeat=pos%2===1,pb=Math.floor(i/8)%4;
-      const pw=phraseShape==='anchor'?[1,0.75,0.92,0.68][pb]:phraseShape==='stagger'?[0.72,1,0.66,0.94][pb]:phraseShape==='mirror'?[1,0.78,0.78,1][pb]:phraseShape==='wave'?[0.6,0.8,1,0.85][pb]:[1,0.9,0.68,0.56][pb];
-      let hit=false;
-      const dm=density*laneMult;
-      if(lane==='kick'){if(strong||Math.random()<(groove.kickBias+dm*0.18+(strong?0.2:0))*pw)hit=true;}
-      else if(lane==='snare'){if(backbeat||Math.random()<(groove.snareBias+dm*0.08+(backbeat?0.26:0))*(1.06-pw*0.18))hit=true;}
-      else if(lane==='hat'){if(Math.random()<(!offbeat?groove.hatBias-0.08+dm*0.2:groove.hatBias+dm*0.16)*(0.82+pw*0.22))hit=true;}
-      else if(lane==='bass'){if(Math.random()<(pos===0||pos===3||pos===7?0.94:groove.bassBias+dm*0.14)*(0.8+pw*0.26))hit=true;}
-      else if(lane==='synth'){if((Math.random()<(pos===2||pos===6||pos===10?0.72:groove.synthBias+dm*0.1)*(0.7+pw*0.34)&&!strong)||(pb===3&&Math.random()<0.18+chaos*0.16))hit=true;}
-      if(hit){
-        p[lane][i].on=true;
-        // Probability from section archetype
-        p[lane][i].prob=clamp(arch.probFloor+Math.random()*(1-arch.probFloor),arch.probFloor,1);
-        // Velocity from curve
-        p[lane][i].vel=clamp(velCurve(arch.velCurve,i,ll,pw),0.25,1);
-        // Note length from section bias + lane type
-        const baseLenBias=arch.lenBias;
-        if(lane==='bass'||lane==='synth'){
-          const r=Math.random();
-          p[lane][i].len=r<0.5?baseLenBias:r<0.75?baseLenBias*2:r<0.9?0.5:baseLenBias*0.75;
-        } else {
-          p[lane][i].len=1;
-        }
-      }
-    }
-  }
-  // Guarantee anchors
-  for(let i=0;i<ell.kick;i+=16)p.kick[i].on=true;
-  for(let i=0;i<ell.snare;i+=16){if(i+4<ell.snare)p.snare[i+4].on=true;if(i+12<ell.snare)p.snare[i+12].on=true;}
-  // Mutation passes
-  const mp=Math.max(2,Math.floor(chaos*10));
-  for(let m=0;m<mp;m++){const lane=seededChoice(LANE_KEYS),ll=ell[lane]||masterLength,pos=Math.floor(Math.random()*ll);
-    if(lane==='hat'){p.hat[pos].on=!p.hat[pos].on;}
-    else if(lane==='kick'){if(pos%4!==0)p.kick[pos].on=Math.random()<0.42+chaos*0.22;}
-    else if(lane==='bass'||lane==='synth'){p[lane][pos].on=!p[lane][pos].on;}
-    else{p.snare[pos].on=!p.snare[pos].on&&pos%4!==0;}
-  }
-  for(let i=ell.bass;i<MAX_STEPS;i++)bassLine[i]=bassLine[Math.max(0,i%Math.max(1,ell.bass))];
-  for(let i=ell.synth;i<MAX_STEPS;i++)synthLine[i]=synthLine[Math.max(0,i%Math.max(1,ell.synth))];
-
-  return{patterns:p,bassLine,synthLine,laneLengths:ell,
-    sectionProfile:sectionType+' · '+gl.section,
-    harmonicProfile:modeName,grooveProfile:grooveName,arpeMode,
-    drumPreset:Math.floor((Math.random()*drumPresets.length+currentPresets.drumPreset*0.35)%drumPresets.length),
-    bassPreset:Math.floor((Math.random()*bassPresets.length+currentPresets.bassPreset*0.35)%bassPresets.length),
-    synthPreset:Math.floor((Math.random()*synthPresets.length+currentPresets.synthPreset*0.35)%synthPresets.length),
-    fxPreset:Math.floor(Math.random()*fxScenes.length),
-  };
-}
-
-// ─── Core helpers (needed by both generative and component code) ──────────────
+const MOODS={
+  hypnotic:{densityBias:-0.15,chaosBias:-0.2,preferredSections:['groove','break'],lenBias:2.5,arpePool:['up','updown']},
+  nervous: {densityBias:+0.1, chaosBias:+0.25,preferredSections:['tension','build'],lenBias:0.8,arpePool:['random','outside']},
+  marzial: {densityBias:+0.2, chaosBias:-0.1,preferredSections:['drop','groove'],lenBias:1,arpePool:['up','down']},
+  sospeso: {densityBias:-0.2, chaosBias:+0.1,preferredSections:['break','intro'],lenBias:3.5,arpePool:['updown','outside']},
+  bunker:  {densityBias:+0.15,chaosBias:+0.05,preferredSections:['drop','fill'],lenBias:1,arpePool:['up','random']},
+  liquido: {densityBias:-0.05,chaosBias:+0.15,preferredSections:['groove','tension'],lenBias:2,arpePool:['updown','random']},
+};
+const MOOD_NAMES=Object.keys(MOODS);
+const ROLE_MAPS={
+  kick_lead:  {kick:1.4,snare:0.9,hat:0.7,bass:1.0,synth:0.6},
+  synth_lead: {kick:0.7,snare:0.8,hat:1.0,bass:0.9,synth:1.5},
+  bass_lead:  {kick:0.8,snare:0.9,hat:0.8,bass:1.4,synth:0.7},
+  balanced:   {kick:1.0,snare:1.0,hat:1.0,bass:1.0,synth:1.0},
+  hat_lead:   {kick:0.6,snare:0.7,hat:1.6,bass:0.8,synth:1.1},
+};
+const ROLE_MAP_NAMES=Object.keys(ROLE_MAPS);
 const GROOVE_MAP={
   steady:{kickBias:0.22,snareBias:0.16,hatBias:0.58,bassBias:0.22,synthBias:0.12},
   broken:{kickBias:0.28,snareBias:0.14,hatBias:0.46,bassBias:0.28,synthBias:0.18},
@@ -365,6 +166,217 @@ function makePatternTemplate(sc=DEFAULT_STEPS){
   [2,6,11,14,19,27,35,43,50,58].forEach(i=>{if(i<sc)p.synth[i].on=true;});
   return p;
 }
+function chooseMode(chaos){
+  if(chaos>0.82)return seededChoice(['chroma','phrygian']);
+  if(chaos>0.62)return seededChoice(['minor','phrygian','dorian']);
+  if(chaos>0.42)return seededChoice(['minor','dorian','mixo']);
+  return seededChoice(['minor','mixo','lydian']);
+}
+function chooseGroove(density,chaos){
+  if(density>0.68&&chaos>0.45)return'bunker';
+  if(chaos>0.62)return'broken';
+  if(density<0.38)return'float';
+  return'steady';
+}
+function chooseSection(density,chaos,iterCount,mood){
+  const m=MOODS[mood];
+  if(m&&m.preferredSections&&Math.random()<0.65)return seededChoice(m.preferredSections);
+  if(iterCount===0)return seededChoice(['intro','groove']);
+  if(density<0.25)return seededChoice(['break','intro','outro']);
+  if(density>0.78&&chaos>0.55)return seededChoice(['drop','drop','fill','tension']);
+  if(density>0.55&&chaos>0.4)return seededChoice(['groove','build','drop','tension']);
+  if(chaos>0.65)return seededChoice(['tension','break','groove']);
+  return seededChoice(['groove','break','build','fill']);
+}
+function chordNotes(chord,pool){
+  const len=pool.length;
+  return[pool[chord.root%len],pool[chord.third%len],pool[chord.fifth%len]].filter(Boolean);
+}
+function voiceLead(currentNote,pool,direction){
+  direction=direction||'any';
+  if(!pool.length)return currentNote;
+  const idx=pool.indexOf(currentNote);
+  if(idx===-1)return pool[Math.floor(Math.random()*pool.length)];
+  if(direction==='up')return pool[Math.min(idx+1,pool.length-1)];
+  if(direction==='down')return pool[Math.max(idx-1,0)];
+  const r=Math.random();
+  if(r<0.55)return pool[Math.min(idx+1,pool.length-1)];
+  if(r<0.8)return pool[Math.max(idx-1,0)];
+  return pool[clamp(idx+(Math.random()<0.5?2:-2),0,pool.length-1)];
+}
+function velCurve(type,stepIdx,totalSteps,phraseWeight){
+  const t=stepIdx/totalSteps;
+  switch(type){
+    case'rise':return clamp(0.35+t*0.65*phraseWeight,0.2,1);
+    case'fall':return clamp(0.95-t*0.55,0.2,1);
+    case'accent':return stepIdx%4===0?clamp(0.9+phraseWeight*0.1,0.7,1):clamp(0.55+phraseWeight*0.3,0.3,0.85);
+    case'groove':return stepIdx%8===0?0.95:stepIdx%4===0?0.78:stepIdx%2===0?0.62:0.45+Math.random()*0.2;
+    case'flat':return clamp(0.6+phraseWeight*0.2,0.4,0.85);
+    default:return clamp(0.5+phraseWeight*0.5,0.3,1);
+  }
+}
+function arpeggiate(notes,mode,step){
+  if(!notes||!notes.length)return'C4';
+  const n=notes.length;
+  switch(mode){
+    case'up':return notes[step%n];
+    case'down':return notes[(n-1)-(step%n)];
+    case'updown':{const period=Math.max(1,n*2-2);const p=step%period;return p<n?notes[p]:notes[period-p];}
+    case'random':return notes[Math.floor(Math.random()*n)];
+    case'outside':{const p=step%n;return p%2===0?notes[Math.floor(p/2)]:notes[n-1-Math.floor(p/2)];}
+    default:return notes[step%n];
+  }
+}
+function buildNoteLanes(stepCount,modeName,chaos,progression,arpeMode){
+  const mode=MODES[modeName]||MODES.minor;
+  const bassPool=mode.bass,synthPool=mode.synth;
+  const bassLine=makeEmptyNotes(bassPool[0]),synthLine=makeEmptyNotes(synthPool[0]);
+  const chordLen=Math.max(1,Math.floor(stepCount/4));
+  let lastBass=bassPool[0];
+  for(let i=0;i<stepCount;i++){
+    const chordIdx=Math.floor(i/chordLen)%progression.length;
+    const chord=progression[chordIdx];
+    const bassChordNotes=chordNotes(chord,bassPool);
+    const synthChordNotes=chordNotes(chord,synthPool);
+    const isPassingTone=Math.random()<chaos*0.12;
+    if(isPassingTone){lastBass=voiceLead(lastBass,bassPool,'any');}
+    else{
+      const nearest=bassChordNotes.reduce(function(best,n){
+        const bIdx=bassPool.indexOf(best),nIdx=bassPool.indexOf(n),cIdx=bassPool.indexOf(lastBass);
+        return Math.abs(nIdx-cIdx)<Math.abs(bIdx-cIdx)?n:best;
+      },bassChordNotes[0]);
+      lastBass=nearest;
+    }
+    bassLine[i]=lastBass;
+    synthLine[i]=arpeggiate(synthChordNotes,arpeMode,i);
+  }
+  return{bassLine,synthLine};
+}
+function chooseLaneLengths(density,chaos,grooveName){
+  const banks={
+    steady:[{kick:16,snare:16,hat:16,bass:32,synth:32,section:'pulse-cell'},{kick:32,snare:16,hat:32,bass:32,synth:48,section:'night-drive'},{kick:16,snare:32,hat:16,bass:48,synth:64,section:'slow-rise'}],
+    broken:[{kick:32,snare:16,hat:32,bass:32,synth:48,section:'fracture-loop'},{kick:32,snare:32,hat:48,bass:32,synth:64,section:'split-engine'},{kick:16,snare:48,hat:32,bass:48,synth:32,section:'off-axis'}],
+    bunker:[{kick:16,snare:32,hat:16,bass:32,synth:48,section:'pressure-room'},{kick:32,snare:16,hat:32,bass:16,synth:64,section:'steel-corridor'},{kick:16,snare:16,hat:48,bass:32,synth:64,section:'locked-floor'}],
+    float: [{kick:32,snare:32,hat:48,bass:32,synth:64,section:'mist-window'},{kick:16,snare:48,hat:32,bass:48,synth:64,section:'ghost-hall'},{kick:16,snare:32,hat:48,bass:32,synth:48,section:'soft-tilt'}],
+  };
+  const sel=seededChoice(banks[grooveName]||banks.steady),allowed=[16,32,48,64];
+  const snap=v=>allowed.reduce(function(b,c){return Math.abs(c-v)<Math.abs(b-v)?c:b;},allowed[0]);
+  const nudge=chaos>0.72?8:density>0.64?0:-4;
+  return{kick:snap(clamp(sel.kick+nudge,16,MAX_STEPS)),snare:snap(clamp(sel.snare+nudge,16,MAX_STEPS)),hat:snap(clamp(sel.hat+nudge,16,MAX_STEPS)),bass:snap(clamp(sel.bass+nudge,16,MAX_STEPS)),synth:snap(clamp(sel.synth+nudge,16,MAX_STEPS)),section:sel.section};
+}
+function getGrooveAccent(profile,lane,stepIndex,amount){
+  const pos=stepIndex%16;
+  const maps={
+    steady:{kick:[1.2,1,0.92,0.96,1,0.94,0.98,0.96,1.18,0.98,0.92,0.96,1.02,0.96,0.98,0.96],snare:[0.92,0.9,0.92,0.9,1.16,0.92,0.92,0.9,0.92,0.9,0.92,0.9,1.12,0.92,0.92,0.9],hat:[0.92,1.02,0.9,1.04,0.94,1.02,0.9,1.06,0.92,1.02,0.9,1.04,0.94,1.02,0.9,1.08],bass:[1.1,0.96,0.98,1.02,0.96,0.94,1,1.04,1.08,0.96,0.98,1.02,0.96,0.94,1,1.04],synth:[0.96,1,1.04,1,0.96,1,1.08,1,0.96,1,1.04,1,0.96,1,1.12,1]},
+    broken:{kick:[1.22,0.88,1.04,0.84,0.96,1.06,0.9,1.02,1.14,0.86,1.08,0.82,0.94,1.04,0.9,1.06],snare:[0.88,0.94,0.9,1,1.12,0.9,0.96,0.9,0.88,1,0.9,0.96,1.1,0.88,1,0.92],hat:[0.84,1.08,0.9,1.14,0.86,1.02,0.92,1.12,0.84,1.08,0.9,1.14,0.86,1.02,0.92,1.16],bass:[1.06,0.94,1.1,0.88,1,0.94,1.08,0.9,1.04,0.94,1.1,0.88,1,0.94,1.08,0.92],synth:[0.92,1.04,1.12,0.9,0.94,1.08,1.14,0.88,0.92,1.04,1.1,0.9,0.94,1.08,1.16,0.86]},
+    bunker:{kick:[1.28,0.92,0.94,0.9,1.02,0.92,0.94,0.9,1.24,0.92,0.94,0.9,1.04,0.92,0.94,0.9],snare:[0.9,0.9,0.92,0.9,1.08,0.9,0.92,0.9,0.9,0.9,0.92,0.9,1.06,0.9,0.92,0.9],hat:[0.88,0.98,0.9,1.02,0.88,0.98,0.9,1.04,0.88,0.98,0.9,1.02,0.88,0.98,0.9,1.06],bass:[1.16,0.94,0.96,1,1.04,0.94,0.96,1.02,1.14,0.94,0.96,1,1.06,0.94,0.96,1.04],synth:[0.9,0.98,1.02,0.96,0.9,0.98,1.06,0.96,0.9,0.98,1.02,0.96,0.9,0.98,1.1,0.96]},
+    float: {kick:[1.12,0.98,0.96,1,1.04,0.98,0.96,1,1.1,0.98,0.96,1,1.02,0.98,0.96,1],snare:[0.94,0.98,0.96,1,1.06,0.98,0.96,1,0.94,0.98,0.96,1,1.08,0.98,0.96,1],hat:[0.96,1.02,0.98,1.04,0.96,1.02,0.98,1.06,0.96,1.02,0.98,1.04,0.96,1.02,0.98,1.08],bass:[1.04,0.98,1,1.02,1.04,0.98,1,1.04,1.02,0.98,1,1.02,1.06,0.98,1,1.04],synth:[1,1.04,1.08,1.02,1,1.04,1.1,1.02,1,1.04,1.08,1.02,1,1.04,1.12,1.02]},
+  };
+  const table=(maps[profile]||maps.steady)[lane]||maps.steady.kick;
+  return 1+(table[pos]||1-1)*clamp(amount,0,1);
+}
+// Build pattern data from a seed
+function buildPatternFromSeed(seed,laneStepCounts,stepCount){
+  const{modeName,grooveName,sectionType,arch,roleMap,arpeMode,progression,phraseShape,effectiveDensity,effectiveChaos}=seed;
+  const gl=chooseLaneLengths(effectiveDensity,effectiveChaos,grooveName);
+  const ell={kick:gl.kick||laneStepCounts.kick||stepCount,snare:gl.snare||laneStepCounts.snare||stepCount,hat:gl.hat||laneStepCounts.hat||stepCount,bass:gl.bass||laneStepCounts.bass||stepCount,synth:gl.synth||laneStepCounts.synth||stepCount};
+  const masterLength=Math.max.apply(null,Object.values(ell));
+  const{bassLine,synthLine}=buildNoteLanes(masterLength,modeName,effectiveChaos,progression,arpeMode);
+  const p={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};
+  const groove=GROOVE_MAP[grooveName];const bar=16;
+  const phraseWeightsMap={anchor:[1,0.75,0.92,0.68],stagger:[0.72,1,0.66,0.94],mirror:[1,0.78,0.78,1],fall:[1,0.9,0.68,0.56],wave:[0.6,0.8,1,0.85],spike:[0.5,0.95,0.55,1]};
+  const LANE_KEYS_LOCAL=['kick','snare','hat','bass','synth'];
+  for(var li=0;li<LANE_KEYS_LOCAL.length;li++){
+    var lane=LANE_KEYS_LOCAL[li];
+    var ll=ell[lane]||masterLength;
+    var laneMult=(arch[lane+'Mult']||1)*(roleMap[lane]||1);
+    for(var i=0;i<ll;i++){
+      var pos=i%bar,strong=pos===0||pos===8,backbeat=pos===4||pos===12,offbeat=pos%2===1,pb=Math.floor(i/8)%4;
+      var pw=(phraseWeightsMap[phraseShape]||phraseWeightsMap.anchor)[pb];
+      var hit=false;var dm=effectiveDensity*laneMult;
+      if(lane==='kick'){if(strong||Math.random()<(groove.kickBias+dm*0.18+(strong?0.2:0))*pw)hit=true;}
+      else if(lane==='snare'){if(backbeat||Math.random()<(groove.snareBias+dm*0.08+(backbeat?0.26:0))*(1.06-pw*0.18))hit=true;}
+      else if(lane==='hat'){if(Math.random()<(!offbeat?groove.hatBias-0.08+dm*0.2:groove.hatBias+dm*0.16)*(0.82+pw*0.22))hit=true;}
+      else if(lane==='bass'){if(Math.random()<(pos===0||pos===3||pos===7?0.94:groove.bassBias+dm*0.14)*(0.8+pw*0.26))hit=true;}
+      else if(lane==='synth'){if((Math.random()<(pos===2||pos===6||pos===10?0.72:groove.synthBias+dm*0.1)*(0.7+pw*0.34)&&!strong)||(pb===3&&Math.random()<0.18+effectiveChaos*0.16))hit=true;}
+      if(hit){
+        p[lane][i].on=true;
+        p[lane][i].prob=clamp(arch.probFloor+Math.random()*(1-arch.probFloor),arch.probFloor,1);
+        p[lane][i].vel=clamp(velCurve(arch.velCurve,i,ll,pw),0.25,1);
+        if(lane==='bass'||lane==='synth'){var r=Math.random();var lb=arch.lenBias;p[lane][i].len=r<0.45?lb:r<0.7?lb*1.5:r<0.88?0.5:lb*2;}
+        else{p[lane][i].len=1;}
+      }
+    }
+  }
+  for(var k=0;k<ell.kick;k+=16)p.kick[k].on=true;
+  for(var s=0;s<ell.snare;s+=16){if(s+4<ell.snare)p.snare[s+4].on=true;if(s+12<ell.snare)p.snare[s+12].on=true;}
+  var mp=Math.max(1,Math.floor(effectiveChaos*8));
+  for(var m=0;m<mp;m++){
+    var mLane=seededChoice(LANE_KEYS_LOCAL);var mll=ell[mLane]||masterLength;var mpos=Math.floor(Math.random()*mll);
+    if(mLane==='hat')p.hat[mpos].on=!p.hat[mpos].on;
+    else if(mLane==='kick'){if(mpos%4!==0)p.kick[mpos].on=Math.random()<0.4+effectiveChaos*0.2;}
+    else if(mLane==='bass'||mLane==='synth')p[mLane][mpos].on=!p[mLane][mpos].on;
+    else{p.snare[mpos].on=!p.snare[mpos].on&&mpos%4!==0;}
+  }
+  for(var bi=ell.bass;bi<MAX_STEPS;bi++)bassLine[bi]=bassLine[Math.max(0,bi%Math.max(1,ell.bass))];
+  for(var si2=ell.synth;si2<MAX_STEPS;si2++)synthLine[si2]=synthLine[Math.max(0,si2%Math.max(1,ell.synth))];
+  return{patterns:p,bassLine,synthLine,laneLengths:ell,glSection:gl.section};
+}
+// FREESTYLE 2.0 — CompositionSeed architecture
+function buildCompositionSeed(density,chaos,currentPresets,options){
+  options=options||{};
+  var iterCount=options.iterCount||0;
+  var moodName=options.mood||seededChoice(MOOD_NAMES);
+  var mood=MOODS[moodName];
+  var effectiveDensity=clamp(density+(mood.densityBias||0),0.05,0.98);
+  var effectiveChaos=clamp(chaos+(mood.chaosBias||0),0,1);
+  var modeName=chooseMode(effectiveChaos);
+  var grooveName=chooseGroove(effectiveDensity,effectiveChaos);
+  var sectionType=options.sectionType||chooseSection(effectiveDensity,effectiveChaos,iterCount,moodName);
+  var arch=SECTION_ARCHETYPES[sectionType]||SECTION_ARCHETYPES.groove;
+  var roleMapName=seededChoice(ROLE_MAP_NAMES);
+  var roleMap=ROLE_MAPS[roleMapName];
+  var arpeMode=seededChoice(mood.arpePool||['up','down','updown']);
+  var progPool=CHORD_PROGRESSIONS[modeName]||CHORD_PROGRESSIONS.minor;
+  var progression=seededChoice(progPool);
+  var phraseShape=seededChoice(['anchor','stagger','mirror','fall','wave','spike']);
+  return{moodName,modeName,grooveName,sectionType,arch,roleMapName,roleMap,arpeMode,progression,phraseShape,effectiveDensity,effectiveChaos,
+    drumPreset:Math.floor((Math.random()*drumPresets.length+currentPresets.drumPreset*0.35)%drumPresets.length),
+    bassPreset:Math.floor((Math.random()*bassPresets.length+currentPresets.bassPreset*0.35)%bassPresets.length),
+    synthPreset:Math.floor((Math.random()*synthPresets.length+currentPresets.synthPreset*0.35)%synthPresets.length),
+    fxPreset:Math.floor(Math.random()*fxScenes.length),
+  };
+}
+// AUTOJAM TRANSFORMATION ENGINE — operates on existing seed, preserves identity
+function applyTransformation(currentPatterns,currentBassLine,currentSynthLine,currentSeed,laneStepCounts,transformType){
+  var p={kick:currentPatterns.kick.map(function(s){return Object.assign({},s);}),snare:currentPatterns.snare.map(function(s){return Object.assign({},s);}),hat:currentPatterns.hat.map(function(s){return Object.assign({},s);}),bass:currentPatterns.bass.map(function(s){return Object.assign({},s);}),synth:currentPatterns.synth.map(function(s){return Object.assign({},s);})};
+  var bassLine=currentBassLine.slice(),synthLine=currentSynthLine.slice();
+  var modeName=currentSeed.modeName,effectiveChaos=currentSeed.effectiveChaos,arpeMode=currentSeed.arpeMode,progression=currentSeed.progression;
+  switch(transformType){
+    case'subtract':{var lane=seededChoice(['hat','synth','bass']);var len=laneStepCounts[lane]||32;var removed=0,maxRemove=Math.floor(len*0.25);for(var i=len-1;i>=0&&removed<maxRemove;i--){if(p[lane][i].on&&Math.random()<0.4){p[lane][i].on=false;removed++;}}break;}
+    case'intensify':{var ilane=seededChoice(['hat','kick','snare']);var ilen=laneStepCounts[ilane]||16;for(var j=0;j<ilen;j++){if(!p[ilane][j].on&&Math.random()<0.22){p[ilane][j].on=true;p[ilane][j].vel=0.55+Math.random()*0.25;p[ilane][j].prob=0.65+Math.random()*0.25;}}break;}
+    case'rotate':{var rlane=seededChoice(['bass','synth','hat']);var rlen=laneStepCounts[rlane]||32;var rdir=Math.random()<0.5?1:-1;var rsrc=p[rlane].slice(0,rlen);var rrot=rsrc.map(function(_,i){return rsrc[(i-rdir+rlen)%rlen];});for(var ri=0;ri<rlen;ri++)p[rlane][ri]=rrot[ri];break;}
+    case'reharmonize':{var progPool2=CHORD_PROGRESSIONS[modeName]||CHORD_PROGRESSIONS.minor;var newProg=seededChoice(progPool2);var masterLen=Math.max.apply(null,Object.values(laneStepCounts));var newLines=buildNoteLanes(masterLen,modeName,effectiveChaos,newProg,arpeMode);for(var ni=0;ni<MAX_STEPS;ni++){bassLine[ni]=newLines.bassLine[ni];synthLine[ni]=newLines.synthLine[ni];}break;}
+    case'thinOut':{['kick','snare','hat'].forEach(function(tl){var tlen=laneStepCounts[tl]||16;for(var ti=0;ti<tlen;ti++){if(p[tl][ti].on&&Math.random()<0.45&&ti%4!==0)p[tl][ti].on=false;}});break;}
+    case'accentShift':{['kick','snare','hat','bass','synth'].forEach(function(al){var alen=laneStepCounts[al]||16;for(var ai=0;ai<alen;ai++){if(p[al][ai].on)p[al][ai].vel=clamp(p[al][ai].vel+(Math.random()-0.5)*0.4,0.2,1);}});break;}
+    case'timbreOpen':{['bass','synth'].forEach(function(ol){var olen=laneStepCounts[ol]||32;for(var oi=0;oi<olen;oi++){if(p[ol][oi].on)p[ol][oi].len=Math.min(p[ol][oi].len*1.6,4);}});break;}
+    case'recallCore':{['hat','synth'].forEach(function(cl){var clen=laneStepCounts[cl]||16;for(var ci=0;ci<clen;ci++){if(p[cl][ci].on&&ci%2!==0&&Math.random()<0.5)p[cl][ci].on=false;}});var kLen=laneStepCounts.kick||16;for(var ki=0;ki<kLen;ki+=16)p.kick[ki].on=true;break;}
+    case'mutateRhythm':{var mrl=seededChoice(['kick','snare','hat','bass','synth']);var mrlen=laneStepCounts[mrl]||16;var mrflips=Math.max(2,Math.floor(mrlen*(0.04+effectiveChaos*0.08)));for(var mri=0;mri<mrflips;mri++){var mrpos=Math.floor(Math.random()*mrlen);if(mrpos%4!==0||mrl!=='kick')p[mrl][mrpos].on=!p[mrl][mrpos].on;}break;}
+  }
+  return{patterns:p,bassLine,synthLine};
+}
+function buildFreestylePattern(stepCount,laneStepCounts,density,chaos,currentPresets,options){
+  options=options||{};
+  var seed=buildCompositionSeed(density,chaos,currentPresets,options);
+  var built=buildPatternFromSeed(seed,laneStepCounts,stepCount);
+  return{patterns:built.patterns,bassLine:built.bassLine,synthLine:built.synthLine,laneLengths:built.laneLengths,
+    seed:seed,
+    sectionProfile:seed.moodName+' · '+seed.sectionType+' · '+built.glSection,
+    harmonicProfile:seed.modeName,grooveProfile:seed.grooveName,arpeMode:seed.arpeMode,
+    drumPreset:seed.drumPreset,bassPreset:seed.bassPreset,synthPreset:seed.synthPreset,fxPreset:seed.fxPreset,
+  };
+}
+
 
 // ─── UI Components ─────────────────────────────────────────────────────────────
 const B0='#080d18',B1='rgba(255,255,255,0.025)',BD='rgba(255,255,255,0.07)';
@@ -476,6 +488,7 @@ export default function CesiraV1(){
   const [sdLane,setSdLane]=useState('bass');
   const [iterCount,setIterCount]=useState(0);
   const [arpeMode,setArpeMode]=useState('up');
+  const [currentSeed,setCurrentSeed]=useState(null); // tracks active CompositionSeed for AutoJam
   const [laneVU,setLaneVU]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
@@ -1087,41 +1100,57 @@ export default function CesiraV1(){
   const setLaneStepCount=(lane,n)=>setLaneStepCounts(prev=>({...prev,[lane]:clamp(n,16,MAX_STEPS)}));
   const randomize=()=>{
     const fs=buildFreestylePattern(stepCount,laneStepCounts,density,chaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
-    pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
+    pushUndo(patterns);
+    setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
     setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
-    setArpeMode(fs.arpeMode||'up');
+    setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);
     setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
     setIterCount(c=>c+1);
     setStatusText(`${fs.sectionProfile} · ${fs.grooveProfile} · ${fs.harmonicProfile} · arp:${fs.arpeMode}`);
   };
+
+  // Transformation types AutoJam cycles through with musical logic
+  const TRANSFORM_SEQUENCE=['mutateRhythm','accentShift','subtract','intensify','reharmonize','rotate','thinOut','timbreOpen','recallCore','mutateRhythm'];
+
   const autoJam=()=>{
-    // Gradual evolution — parameters shift from current values, not random jump
-    const newDensity=clamp(density+(Math.random()-0.4)*0.18,0.1,0.95);
-    const newChaos=clamp(chaos+(Math.random()-0.4)*0.14,0,1);
-    const fs=buildFreestylePattern(stepCount,laneStepCounts,newDensity,newChaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
-    pushUndo(patterns);setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
-    setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
-    setArpeMode(fs.arpeMode||'up');setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
-    // Gradual parameter evolution — never jumps to extremes
-    setDensity(newDensity);setChaos(newChaos);
-    setTone(clamp(tone+(Math.random()-0.5)*0.22,0.1,1));
-    setNoise(clamp(noise+(Math.random()-0.5)*0.18,0,1));
-    setSpace(clamp(space+(Math.random()-0.5)*0.2,0,1));
-    setSwing(clamp(swing+(Math.random()-0.5)*0.06,0,0.25));
-    setBassCutoff(clamp(bassCutoff+(Math.random()-0.5)*0.3,0,1));
-    setSynthCutoff(clamp(synthCutoff+(Math.random()-0.5)*0.28,0,1));
-    setBassSubAmount(clamp(bassSubAmount+(Math.random()-0.5)*0.2,0.1,1));
-    setSynthAttack(clamp(synthAttack+(Math.random()-0.5)*0.12,0,1));
-    setSynthRelease(clamp(synthRelease+(Math.random()-0.5)*0.18,0,1));
+    // If we have an active seed, apply a targeted transformation (preserves identity)
+    // After every 3 transforms, regenerate a new seed for variety
+    const shouldRegenerate=!currentSeed||iterCount%4===0;
+    if(shouldRegenerate){
+      // Regenerate with gradual density/chaos evolution
+      const newDensity=clamp(density+(Math.random()-0.4)*0.18,0.1,0.95);
+      const newChaos=clamp(chaos+(Math.random()-0.4)*0.14,0,1);
+      const fs=buildFreestylePattern(stepCount,laneStepCounts,newDensity,newChaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
+      pushUndo(patterns);
+      setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
+      setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
+      setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);
+      setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
+      setDensity(newDensity);setChaos(newChaos);
+    } else {
+      // Apply targeted transformation — keeps musical identity, varies the texture
+      const transformType=TRANSFORM_SEQUENCE[iterCount%TRANSFORM_SEQUENCE.length];
+      const result=applyTransformation(patterns,bassLine,synthLine,currentSeed,laneStepCounts,transformType);
+      pushUndo(patterns);
+      setPatterns(result.patterns);setBassLine(result.bassLine);setSynthLine(result.synthLine);
+      setStatusText(`Transform: ${transformType} · ${currentSeed.moodName} · ${currentSeed.sectionType}`);
+    }
+    // Gradual timbric evolution regardless of mode
+    setTone(clamp(tone+(Math.random()-0.5)*0.18,0.1,1));
+    setNoise(clamp(noise+(Math.random()-0.5)*0.15,0,1));
+    setSpace(clamp(space+(Math.random()-0.5)*0.16,0,1));
+    setSwing(clamp(swing+(Math.random()-0.5)*0.05,0,0.25));
+    setBassCutoff(clamp(bassCutoff+(Math.random()-0.5)*0.22,0,1));
+    setSynthCutoff(clamp(synthCutoff+(Math.random()-0.5)*0.2,0,1));
     setLaneFx(prev=>({
-      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.12,0,1),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.15,0,1)},
-      snare:{...prev.snare,drive:clamp(prev.snare.drive+(Math.random()-0.5)*0.1,0,1),echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.08,0,1)},
-      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.14,0,1),crush:clamp(prev.hat.crush+(Math.random()-0.5)*0.08,0,1)},
-      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.1,0,1),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.14,0,1)},
-      synth:{...prev.synth,drive:clamp(prev.synth.drive+(Math.random()-0.5)*0.1,0,1),echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.1,0,1)},
+      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.1,0,0.8),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.12,0,1)},
+      snare:{...prev.snare,echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.07,0,1)},
+      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.12,0,1)},
+      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.08,0,0.8),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.12,0,1)},
+      synth:{...prev.synth,echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.09,0,1)},
     }));
     setIterCount(c=>c+1);
-    setStatusText(`Auto Jam #${iterCount+1} · ${fs.sectionProfile} · ${fs.harmonicProfile}`);
+    if(shouldRegenerate)setStatusText(`Auto Jam #${iterCount+1} · new seed`);
   };
   const triggerStutter=async()=>{await initAudio();const audio=audioRef.current;if(!audio)return;const b=Math.max(2,stutterBurst),t=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCounts[activeLane]||stepCount);for(let i=0;i<b;i++){const st=t+i*0.048;if(activeLane==='kick')playDrumAt(Math.min(drumPreset,1),i===0?1:0.7,st);else if(activeLane==='snare')playDrumAt(drumPreset<2?2:3,i===0?1:0.7,st);else if(activeLane==='hat')playDrumAt(drumPreset<4?4:5,i===0?1:0.7,st);else if(activeLane==='bass')playBassAt(bassPreset,bassLine[li]||'C2',i===0?1:0.7,st);else if(activeLane==='synth')playSynthAt(synthPreset,synthLine[li]||'C4',i===0?1:0.7,st);}flashLane(activeLane,1);setStatusText(`${activeLane.toUpperCase()} stutter x${b}.`);};
 
@@ -1244,6 +1273,7 @@ export default function CesiraV1(){
               <span style={{fontSize:'7px',fontWeight:600,color:'#fbbf24'}}>{sectionProfile}</span>
               <span style={{color:'#1e293b',fontSize:'8px'}}>·</span>
               <span style={{fontSize:'7px',fontWeight:600,color:'#a78bfa'}}>arp:{arpeMode}</span>
+              {currentSeed&&<><span style={{color:'#1e293b',fontSize:'8px'}}>·</span><span style={{fontSize:'7px',fontWeight:600,color:'#f87171'}}>{currentSeed.moodName}</span></>}
             </div>
             <div style={{display:'flex',gap:'2px',alignItems:'center'}}>
               <button onClick={()=>setPage(p=>clamp(p-1,0,totalPages-1))} disabled={page===0} style={{...pill(false),padding:'1px 5px',opacity:page===0?0.3:1}}>‹</button>
