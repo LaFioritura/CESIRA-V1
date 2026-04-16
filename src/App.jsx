@@ -146,6 +146,15 @@ const ROLE_MAPS={
   hat_lead:   {kick:0.6,snare:0.7,hat:1.6,bass:0.8,synth:1.1},
 };
 const ROLE_MAP_NAMES=Object.keys(ROLE_MAPS);
+
+const PILOT_PERSONALITIES={
+  director:{label:'Director',sectionFlow:['intro','build','groove','drop','break','groove','fill','drop','outro'],transformFlow:['intensify','accentShift','mutateRhythm','timbreOpen','subtract','reharmonize','rotate','recallCore'],regenEvery:5,recallEvery:4,themeStick:0.78},
+  drifter:{label:'Drifter',sectionFlow:['intro','groove','break','tension','groove','break','outro'],transformFlow:['thinOut','rotate','timbreOpen','mutateRhythm','subtract','reharmonize'],regenEvery:6,recallEvery:5,themeStick:0.62},
+  bunker:{label:'Bunker',sectionFlow:['intro','build','drop','fill','drop','break','drop','outro'],transformFlow:['intensify','accentShift','mutateRhythm','recallCore','intensify','rotate'],regenEvery:4,recallEvery:3,themeStick:0.84},
+  dream:{label:'Dream',sectionFlow:['intro','break','groove','tension','groove','outro'],transformFlow:['timbreOpen','reharmonize','thinOut','rotate','recallCore'],regenEvery:7,recallEvery:4,themeStick:0.7},
+};
+const PILOT_PERSONALITY_NAMES=Object.keys(PILOT_PERSONALITIES);
+
 const GROOVE_MAP={
   steady:{kickBias:0.22,snareBias:0.16,hatBias:0.58,bassBias:0.22,synthBias:0.12},
   broken:{kickBias:0.28,snareBias:0.14,hatBias:0.46,bassBias:0.28,synthBias:0.18},
@@ -491,7 +500,11 @@ export default function CesiraV1(){
   const [currentSeed,setCurrentSeed]=useState(null); // tracks active CompositionSeed for AutoJam
   const [autoPilotOn,setAutoPilotOn]=useState(false);
   const [autoPilotBars,setAutoPilotBars]=useState(4);
-  const [autoPilotStrength,setAutoPilotStrength]=useState(0.58);
+  const [autoPilotStrength,setAutoPilotStrength]=useState(0.62);
+  const [pilotPersonality,setPilotPersonality]=useState('director');
+  const [songPlan,setSongPlan]=useState([]);
+  const [songCursor,setSongCursor]=useState(0);
+  const [themeMemory,setThemeMemory]=useState(null);
   const [laneVU,setLaneVU]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [padFlash,setPadFlash]=useState({kick:0,snare:0,hat:0,bass:0,synth:0});
   const [tapTimes,setTapTimes]=useState([]);
@@ -520,11 +533,10 @@ export default function CesiraV1(){
   const patternsRef=useRef(patterns),bassLineRef=useRef(bassLine),synthLineRef=useRef(synthLine),laneFxRef=useRef(laneFx);
   const macroKnobRef=useRef(macroKnob),grooveAmountRef=useRef(grooveAmount),grooveProfileRef=useRef(grooveProfile),harmonicProfileRef=useRef(harmonicProfile);
   const humanizeRef=useRef(humanize),stutterOnRef=useRef(stutterOn),stutterBurstRef=useRef(stutterBurst),laneVolumesRef=useRef(laneVolumes);
+  const autoPilotOnRef=useRef(autoPilotOn),autoPilotBarsRef=useRef(autoPilotBars),autoPilotStrengthRef=useRef(autoPilotStrength),pilotPersonalityRef=useRef(pilotPersonality);
+  const songPlanRef=useRef(songPlan),songCursorRef=useRef(songCursor),themeMemoryRef=useRef(themeMemory),barCounterRef=useRef(0);
   const drumPresetRef=useRef(drumPreset),bassPresetRef=useRef(bassPreset),synthPresetRef=useRef(synthPreset);
   const bassWaveRef=useRef(bassWave),synthWaveRef=useRef(synthWave),fmIndexRef=useRef(fmIndex);
-  const densityRef=useRef(density),chaosRef=useRef(chaos),currentSeedRef=useRef(currentSeed),iterCountRef=useRef(iterCount);
-  const autoPilotOnRef=useRef(autoPilotOn),autoPilotBarsRef=useRef(autoPilotBars),autoPilotStrengthRef=useRef(autoPilotStrength);
-  const transportTickRef=useRef(0),lastAutoPilotTickRef=useRef(-1),jamCycleRef=useRef(null);
   const midiRef=useRef(null);const importInputRef=useRef(null);const laneGainNodes=useRef({});
   const vuTimers=useRef({});
 
@@ -543,8 +555,6 @@ export default function CesiraV1(){
   useEffect(()=>{drumPresetRef.current=drumPreset;},[drumPreset]);useEffect(()=>{bassPresetRef.current=bassPreset;},[bassPreset]);useEffect(()=>{synthPresetRef.current=synthPreset;},[synthPreset]);
   useEffect(()=>{soundDesignRef.current=soundDesign;},[soundDesign]);
   useEffect(()=>{bassWaveRef.current=bassWave;},[bassWave]);useEffect(()=>{synthWaveRef.current=synthWave;},[synthWave]);useEffect(()=>{fmIndexRef.current=fmIndex;},[fmIndex]);
-  useEffect(()=>{densityRef.current=density;},[density]);useEffect(()=>{chaosRef.current=chaos;},[chaos]);useEffect(()=>{currentSeedRef.current=currentSeed;},[currentSeed]);useEffect(()=>{iterCountRef.current=iterCount;},[iterCount]);
-  useEffect(()=>{autoPilotOnRef.current=autoPilotOn;},[autoPilotOn]);useEffect(()=>{autoPilotBarsRef.current=autoPilotBars;},[autoPilotBars]);useEffect(()=>{autoPilotStrengthRef.current=autoPilotStrength;},[autoPilotStrength]);
   useEffect(()=>{recordingsRef.current=recordings;},[recordings]);
   useEffect(()=>{LANE_KEYS.forEach(lane=>{const node=laneGainNodes.current[lane];if(node&&audioRef.current)node.gain.setTargetAtTime(laneVolumes[lane],audioRef.current.ctx.currentTime,0.02);});},[laneVolumes]);
 
@@ -1036,6 +1046,13 @@ export default function CesiraV1(){
   const scheduleNote=(stepIdx,t)=>{
     const accent=stepIdx%4===0?1:0.86;const lp=patternsRef.current,lsc=laneStepCountsRef.current;
     if(metronomeOn&&stepIdx%4===0)playMetronomeAt(stepIdx%16===0,t);
+    if(stepIdx%16===0 && autoPilotOnRef.current){
+      barCounterRef.current+=1;
+      if(barCounterRef.current>=Math.max(1,autoPilotBarsRef.current)){
+        barCounterRef.current=0;
+        window.setTimeout(()=>runAutoPilotCycle(),0);
+      }
+    }
     sendMidiClock();
     for(const lane of LANE_KEYS){
       const ll=lsc[lane]||stepCountRef.current,li=stepIdx%ll;
@@ -1068,17 +1085,11 @@ export default function CesiraV1(){
       window.setTimeout(()=>{setStep(si);setPage(Math.floor(si/PAGE_SIZE));},delay);
       nextNoteTimeRef.current+=stepInterval(si);
       currentStepRef.current=(si+1)%stepCountRef.current;
-      transportTickRef.current+=1;
-      const triggerEvery=Math.max(16,autoPilotBarsRef.current*16);
-      if(autoPilotOnRef.current&&transportTickRef.current>0&&transportTickRef.current%triggerEvery===0&&lastAutoPilotTickRef.current!==transportTickRef.current){
-        lastAutoPilotTickRef.current=transportTickRef.current;
-        window.setTimeout(()=>{ if(jamCycleRef.current&&isPlayingRef.current) jamCycleRef.current({fromAutoPilot:true}); },0);
-      }
     }
   };
 
-  const startClock=()=>{const audio=audioRef.current;if(!audio)return;nextNoteTimeRef.current=audio.ctx.currentTime+0.06;currentStepRef.current=0;transportTickRef.current=0;lastAutoPilotTickRef.current=-1;isPlayingRef.current=true;schedulerRef.current=setInterval(runScheduler,LOOKAHEAD_MS);};
-  const stopClock=()=>{if(schedulerRef.current){clearInterval(schedulerRef.current);schedulerRef.current=null;}isPlayingRef.current=false;setIsPlaying(false);setStep(0);};
+  const startClock=()=>{const audio=audioRef.current;if(!audio)return;nextNoteTimeRef.current=audio.ctx.currentTime+0.06;currentStepRef.current=0;barCounterRef.current=0;isPlayingRef.current=true;schedulerRef.current=setInterval(runScheduler,LOOKAHEAD_MS);};
+  const stopClock=()=>{if(schedulerRef.current){clearInterval(schedulerRef.current);schedulerRef.current=null;}barCounterRef.current=0;isPlayingRef.current=false;setIsPlaying(false);setStep(0);};
 
   const togglePlay=async()=>{
     await initAudio();if(!audioRef.current)return;
@@ -1112,12 +1123,93 @@ export default function CesiraV1(){
   const clearAll=()=>{stopClock();const empty={kick:makeStepData(),snare:makeStepData(),hat:makeStepData(),bass:makeStepData(),synth:makeStepData()};pushUndo(patterns);setPatterns(empty);setBassLine(makeEmptyNotes('C2'));setSynthLine(makeEmptyNotes('C4'));setLaneStepCounts({kick:16,snare:16,hat:16,bass:16,synth:16});setSectionProfile('pulse-cell');setHarmonicProfile('minor');setGrooveProfile('steady');setStatusText('Cleared.');};
   const handleStepCount=n=>{const s=clamp(n,16,MAX_STEPS);setLaneStepCounts({kick:s,snare:s,hat:s,bass:s,synth:s});};
   const setLaneStepCount=(lane,n)=>setLaneStepCounts(prev=>({...prev,[lane]:clamp(n,16,MAX_STEPS)}));
+
+  const captureThemeMemory=(seedOverride=null)=>({
+    seed:seedOverride||currentSeed,
+    patterns:JSON.parse(JSON.stringify(patternsRef.current)),
+    bassLine:[...bassLineRef.current],
+    synthLine:[...synthLineRef.current],
+    laneStepCounts:{...laneStepCountsRef.current},
+    drumPreset:drumPresetRef.current,
+    bassPreset:bassPresetRef.current,
+    synthPreset:synthPresetRef.current,
+    fxPreset,
+  });
+  const buildSongPlanFromSeed=(seed,personalityName)=>{
+    const persona=PILOT_PERSONALITIES[personalityName]||PILOT_PERSONALITIES.director;
+    const flow=persona.sectionFlow;
+    return flow.map((sectionType,idx)=>({
+      sectionType,
+      bars:(sectionType==='drop'||sectionType==='groove')?4:(sectionType==='fill'?2:4),
+      transform:persona.transformFlow[idx%persona.transformFlow.length],
+      recall:((idx+1)%persona.recallEvery)===0,
+      regenerate:((idx+1)%persona.regenEvery)===0,
+    }));
+  };
+  const applyThemeRecall=(memory)=>{
+    if(!memory)return;
+    pushUndo(patternsRef.current);
+    setPatterns(JSON.parse(JSON.stringify(memory.patterns)));
+    setBassLine([...memory.bassLine]);
+    setSynthLine([...memory.synthLine]);
+    setLaneStepCounts({...memory.laneStepCounts});
+    setCurrentSeed(memory.seed||currentSeed);
+    if(typeof memory.drumPreset==='number')setDrumPreset(memory.drumPreset);
+    if(typeof memory.bassPreset==='number')setBassPreset(memory.bassPreset);
+    if(typeof memory.synthPreset==='number')setSynthPreset(memory.synthPreset);
+    if(typeof memory.fxPreset==='number')setFxPreset(memory.fxPreset);
+    setStatusText('Theme recall.');
+  };
+  const runAutoPilotCycle=(entryOverride=null)=>{
+    const persona=PILOT_PERSONALITIES[pilotPersonalityRef.current]||PILOT_PERSONALITIES.director;
+    let plan=songPlanRef.current;
+    let cursor=songCursorRef.current||0;
+    let entry=entryOverride||plan[cursor%Math.max(1,plan.length)];
+    if(!entry){
+      const seed=currentSeed||buildCompositionSeed(density,chaos,{drumPreset:drumPresetRef.current,bassPreset:bassPresetRef.current,synthPreset:synthPresetRef.current},{iterCount});
+      plan=buildSongPlanFromSeed(seed,pilotPersonalityRef.current);
+      setSongPlan(plan);
+      setCurrentSeed(seed);
+      entry=plan[0];
+      cursor=0;
+    }
+    const strength=autoPilotStrengthRef.current;
+    const forceRecall=entry.recall && themeMemoryRef.current && Math.random()<persona.themeStick;
+    if(forceRecall){
+      applyThemeRecall(themeMemoryRef.current);
+    }else if(entry.regenerate || !currentSeed || Math.random() < (0.18+strength*0.22)){
+      const targetDensity=clamp(density + (entry.sectionType==='drop'?0.18:entry.sectionType==='break'?-0.18:0.02) + (Math.random()-0.5)*0.08,0.08,0.98);
+      const targetChaos=clamp(chaos + (entry.sectionType==='tension'||entry.sectionType==='fill'?0.14:0) + (Math.random()-0.5)*0.06,0,1);
+      const fs=buildFreestylePattern(stepCountRef.current,laneStepCountsRef.current,targetDensity,targetChaos,{drumPreset:drumPresetRef.current,bassPreset:bassPresetRef.current,synthPreset:synthPresetRef.current},{autoLength:true,iterCount,sectionType:entry.sectionType,mood:(currentSeed&&currentSeed.moodName)||undefined});
+      pushUndo(patternsRef.current);
+      setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
+      setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
+      setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);setSongPlan(buildSongPlanFromSeed(fs.seed||null,pilotPersonalityRef.current));if(!themeMemoryRef.current||iterCount%8===0)setThemeMemory(captureThemeMemory(fs.seed||null));setSongCursor(0);setThemeMemory(captureThemeMemory(fs.seed||null));setSongPlan(buildSongPlanFromSeed(fs.seed||null,pilotPersonalityRef.current));setSongCursor(0);
+      setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
+      setDensity(targetDensity);setChaos(targetChaos);
+      if(!themeMemoryRef.current || cursor===0) setThemeMemory(captureThemeMemory(fs.seed||null));
+      setStatusText(`Pilot regenerate · ${entry.sectionType}`);
+    }else{
+      const transformType=entry.transform||persona.transformFlow[cursor%persona.transformFlow.length];
+      const result=applyTransformation(patternsRef.current,bassLineRef.current,synthLineRef.current,currentSeed,laneStepCountsRef.current,transformType);
+      pushUndo(patternsRef.current);
+      setPatterns(result.patterns);setBassLine(result.bassLine);setSynthLine(result.synthLine);
+      setStatusText(`Pilot ${entry.sectionType} · ${transformType}`);
+    }
+    setSectionProfile(prev=>{
+      const mood=(currentSeed&&currentSeed.moodName)||'pilot';
+      return `${mood} · ${entry.sectionType}`;
+    });
+    const nextCursor=(cursor+1)%Math.max(1,plan.length||1);
+    setSongCursor(nextCursor);
+    songCursorRef.current=nextCursor;
+  };
   const randomize=()=>{
     const fs=buildFreestylePattern(stepCount,laneStepCounts,density,chaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
     pushUndo(patterns);
     setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
     setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
-    setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);
+    setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);setThemeMemory(captureThemeMemory(fs.seed||null));setSongPlan(buildSongPlanFromSeed(fs.seed||null,pilotPersonalityRef.current));setSongCursor(0);
     setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
     setIterCount(c=>c+1);
     setStatusText(`${fs.sectionProfile} · ${fs.grooveProfile} · ${fs.harmonicProfile} · arp:${fs.arpeMode}`);
@@ -1126,48 +1218,46 @@ export default function CesiraV1(){
   // Transformation types AutoJam cycles through with musical logic
   const TRANSFORM_SEQUENCE=['mutateRhythm','accentShift','subtract','intensify','reharmonize','rotate','thinOut','timbreOpen','recallCore','mutateRhythm'];
 
-  jamCycleRef.current=(opts={})=>{
-    const fromAutoPilot=!!opts.fromAutoPilot;
-    const densityNow=densityRef.current, chaosNow=chaosRef.current, seedNow=currentSeedRef.current, iterNow=iterCountRef.current;
-    const strength=fromAutoPilot?autoPilotStrengthRef.current:1;
-    const shouldRegenerate=!seedNow||iterNow%4===0||opts.forceRegenerate;
+  const autoJam=()=>{
+    // If we have an active seed, apply a targeted transformation (preserves identity)
+    // After every 3 transforms, regenerate a new seed for variety
+    const shouldRegenerate=!currentSeed||iterCount%4===0;
     if(shouldRegenerate){
-      const phaseSections=['intro','build','groove','drop','break','groove','fill','outro'];
-      const targetSection=fromAutoPilot?phaseSections[Math.floor(iterNow/2)%phaseSections.length]:undefined;
-      const newDensity=clamp(densityNow+(Math.random()-0.4)*0.18*strength,0.1,0.95);
-      const newChaos=clamp(chaosNow+(Math.random()-0.4)*0.14*strength,0,1);
-      const fs=buildFreestylePattern(stepCountRef.current,laneStepCountsRef.current,newDensity,newChaos,{drumPreset:drumPresetRef.current,bassPreset:bassPresetRef.current,synthPreset:synthPresetRef.current},{autoLength:true,iterCount:iterNow,sectionType:targetSection,mood:seedNow?.moodName});
-      pushUndo(patternsRef.current);
+      // Regenerate with gradual density/chaos evolution
+      const newDensity=clamp(density+(Math.random()-0.4)*0.18,0.1,0.95);
+      const newChaos=clamp(chaos+(Math.random()-0.4)*0.14,0,1);
+      const fs=buildFreestylePattern(stepCount,laneStepCounts,newDensity,newChaos,{drumPreset,bassPreset,synthPreset},{autoLength:true,iterCount});
+      pushUndo(patterns);
       setLaneStepCounts(fs.laneLengths);setPatterns(fs.patterns);setBassLine(fs.bassLine);setSynthLine(fs.synthLine);
       setSectionProfile(fs.sectionProfile);setHarmonicProfile(fs.harmonicProfile);setGrooveProfile(fs.grooveProfile);
-      setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);
+      setArpeMode(fs.arpeMode||'up');setCurrentSeed(fs.seed||null);setThemeMemory(captureThemeMemory(fs.seed||null));setSongPlan(buildSongPlanFromSeed(fs.seed||null,pilotPersonalityRef.current));setSongCursor(0);
       setDrumPreset(fs.drumPreset);setBassPreset(fs.bassPreset);setSynthPreset(fs.synthPreset);setFxPreset(fs.fxPreset);
       setDensity(newDensity);setChaos(newChaos);
-      setStatusText(`${fromAutoPilot?'Auto Pilot':'Auto Jam'} #${iterNow+1} · new seed`);
     } else {
-      const transformType=TRANSFORM_SEQUENCE[iterNow%TRANSFORM_SEQUENCE.length];
-      const result=applyTransformation(patternsRef.current,bassLineRef.current,synthLineRef.current,seedNow,laneStepCountsRef.current,transformType);
-      pushUndo(patternsRef.current);
+      // Apply targeted transformation — keeps musical identity, varies the texture
+      const transformType=TRANSFORM_SEQUENCE[iterCount%TRANSFORM_SEQUENCE.length];
+      const result=applyTransformation(patterns,bassLine,synthLine,currentSeed,laneStepCounts,transformType);
+      pushUndo(patterns);
       setPatterns(result.patterns);setBassLine(result.bassLine);setSynthLine(result.synthLine);
-      setStatusText(`${fromAutoPilot?'Auto Pilot':'Transform'}: ${transformType} · ${seedNow.moodName} · ${seedNow.sectionType}`);
+      setStatusText(`Transform: ${transformType} · ${currentSeed.moodName} · ${currentSeed.sectionType}`);
     }
-    setTone(v=>clamp(v+(Math.random()-0.5)*0.18*strength,0.1,1));
-    setNoise(v=>clamp(v+(Math.random()-0.5)*0.15*strength,0,1));
-    setSpace(v=>clamp(v+(Math.random()-0.5)*0.16*strength,0,1));
-    setSwing(v=>clamp(v+(Math.random()-0.5)*0.05*strength,0,0.25));
-    setBassCutoff(v=>clamp(v+(Math.random()-0.5)*0.22*strength,0,1));
-    setSynthCutoff(v=>clamp(v+(Math.random()-0.5)*0.2*strength,0,1));
+    // Gradual timbric evolution regardless of mode
+    setTone(clamp(tone+(Math.random()-0.5)*0.18,0.1,1));
+    setNoise(clamp(noise+(Math.random()-0.5)*0.15,0,1));
+    setSpace(clamp(space+(Math.random()-0.5)*0.16,0,1));
+    setSwing(clamp(swing+(Math.random()-0.5)*0.05,0,0.25));
+    setBassCutoff(clamp(bassCutoff+(Math.random()-0.5)*0.22,0,1));
+    setSynthCutoff(clamp(synthCutoff+(Math.random()-0.5)*0.2,0,1));
     setLaneFx(prev=>({
-      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.1*strength,0,0.8),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.12*strength,0,1)},
-      snare:{...prev.snare,echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.07*strength,0,1)},
-      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.12*strength,0,1)},
-      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.08*strength,0,0.8),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.12*strength,0,1)},
-      synth:{...prev.synth,echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.09*strength,0,1)},
+      kick: {...prev.kick,drive:clamp(prev.kick.drive+(Math.random()-0.5)*0.1,0,0.8),tone:clamp(prev.kick.tone+(Math.random()-0.5)*0.12,0,1)},
+      snare:{...prev.snare,echo:clamp(prev.snare.echo+(Math.random()-0.5)*0.07,0,1)},
+      hat:  {...prev.hat,tone:clamp(prev.hat.tone+(Math.random()-0.5)*0.12,0,1)},
+      bass: {...prev.bass,drive:clamp(prev.bass.drive+(Math.random()-0.5)*0.08,0,0.8),tone:clamp(prev.bass.tone+(Math.random()-0.5)*0.12,0,1)},
+      synth:{...prev.synth,echo:clamp(prev.synth.echo+(Math.random()-0.5)*0.09,0,1)},
     }));
     setIterCount(c=>c+1);
+    if(shouldRegenerate)setStatusText(`Auto Jam #${iterCount+1} · new seed`);
   };
-
-  const autoJam=()=>{ if(jamCycleRef.current) jamCycleRef.current({fromAutoPilot:false}); };
   const triggerStutter=async()=>{await initAudio();const audio=audioRef.current;if(!audio)return;const b=Math.max(2,stutterBurst),t=audio.ctx.currentTime+0.002;const li=currentStepRef.current%(laneStepCounts[activeLane]||stepCount);for(let i=0;i<b;i++){const st=t+i*0.048;if(activeLane==='kick')playDrumAt(Math.min(drumPreset,1),i===0?1:0.7,st);else if(activeLane==='snare')playDrumAt(drumPreset<2?2:3,i===0?1:0.7,st);else if(activeLane==='hat')playDrumAt(drumPreset<4?4:5,i===0?1:0.7,st);else if(activeLane==='bass')playBassAt(bassPreset,bassLine[li]||'C2',i===0?1:0.7,st);else if(activeLane==='synth')playSynthAt(synthPreset,synthLine[li]||'C4',i===0?1:0.7,st);}flashLane(activeLane,1);setStatusText(`${activeLane.toUpperCase()} stutter x${b}.`);};
 
   const fillLane=(lane,amount)=>{pushUndo(patterns);setPatterns(prev=>{const n={...prev,[lane]:[...prev[lane]]};for(let i=0;i<laneStepCounts[lane];i++){n[lane][i]={...n[lane][i],on:Math.random()<amount,prob:clamp(0.6+Math.random()*0.4,0.5,1),vel:clamp(0.5+Math.random()*0.5,0.4,1)};}return n;});};
@@ -1185,14 +1275,14 @@ export default function CesiraV1(){
   const tapTempo=()=>{const now=Date.now();setTapTimes(prev=>{const next=[...prev.filter(t=>now-t<3000),now];if(next.length>=2){const intervals=next.slice(1).map((t,i)=>t-next[i]);const avg=intervals.reduce((a,b)=>a+b,0)/intervals.length;const newBpm=clamp(Math.round(60000/avg),60,200);setBpm(newBpm);setStatusText(`TAP → ${newBpm} BPM`);}return next.slice(-6);});};
 
   // ─── Save/Load ────────────────────────────────────────────────────────────
-  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex,soundDesign,autoPilotOn,autoPilotBars,autoPilotStrength,currentSeed,iterCount,arpeMode});
+  const serializeScene=()=>({bpm,swing,density,chaos,tone,noise,space,master,compressAmount,resonance,bassLfo,synthLfo,drumDecay,bassWave,synthWave,bassCutoff,synthCutoff,bassSubAmount,synthAttack,synthRelease,stutterBurst,stutterOn,macroKnob,grooveAmount,harmonicProfile,grooveProfile,sectionProfile,drumPreset,bassPreset,synthPreset,fxPreset,laneStepCounts,patterns,bassLine,synthLine,laneFx,laneVolumes,projectName,metronomeOn,metronomeLevel,fmIndex,soundDesign,autoPilotOn,autoPilotBars,autoPilotStrength,pilotPersonality,songPlan,songCursor,themeMemory,currentSeed,arpeMode});
   const applySnapshot=(snap,label='Loaded.')=>{
     if(!snap)return;stopClock();if(snap.projectName)setProjectName(snap.projectName);
     const n=(k,s)=>typeof snap[k]==='number'&&s(snap[k]),b=(k,s)=>typeof snap[k]==='boolean'&&s(snap[k]);
-    n('bpm',setBpm);n('swing',setSwing);n('density',setDensity);n('chaos',setChaos);n('tone',setTone);n('noise',setNoise);n('space',setSpace);n('master',setMaster);n('compressAmount',setCompressAmount);n('resonance',setResonance);n('bassLfo',setBassLfo);n('synthLfo',setSynthLfo);n('drumDecay',setDrumDecay);n('bassCutoff',setBassCutoff);n('synthCutoff',setSynthCutoff);n('bassSubAmount',setBassSubAmount);n('synthAttack',setSynthAttack);n('synthRelease',setSynthRelease);n('stutterBurst',setStutterBurst);n('macroKnob',setMacroKnob);n('grooveAmount',setGrooveAmount);n('metronomeLevel',setMetronomeLevel);n('drumPreset',setDrumPreset);n('bassPreset',setBassPreset);n('synthPreset',setSynthPreset);n('fxPreset',setFxPreset);n('fmIndex',setFmIndex);
-    b('stutterOn',setStutterOn);b('metronomeOn',setMetronomeOn);
-    if(snap.harmonicProfile)setHarmonicProfile(snap.harmonicProfile);if(snap.grooveProfile)setGrooveProfile(snap.grooveProfile);if(snap.sectionProfile)setSectionProfile(snap.sectionProfile);if(snap.bassWave)setBassWave(snap.bassWave);if(snap.synthWave)setSynthWave(snap.synthWave);if(typeof snap.autoPilotOn==='boolean')setAutoPilotOn(snap.autoPilotOn);if(typeof snap.autoPilotBars==='number')setAutoPilotBars(snap.autoPilotBars);if(typeof snap.autoPilotStrength==='number')setAutoPilotStrength(snap.autoPilotStrength);if(snap.currentSeed)setCurrentSeed(snap.currentSeed);if(typeof snap.iterCount==='number')setIterCount(snap.iterCount);if(snap.arpeMode)setArpeMode(snap.arpeMode);
-    if(snap.laneStepCounts)setLaneStepCounts(snap.laneStepCounts);if(snap.patterns)setPatterns(snap.patterns);if(snap.bassLine)setBassLine(snap.bassLine);if(snap.synthLine)setSynthLine(snap.synthLine);if(snap.laneFx)setLaneFx(snap.laneFx);if(snap.laneVolumes)setLaneVolumes(snap.laneVolumes);
+    n('bpm',setBpm);n('swing',setSwing);n('density',setDensity);n('chaos',setChaos);n('tone',setTone);n('noise',setNoise);n('space',setSpace);n('master',setMaster);n('compressAmount',setCompressAmount);n('resonance',setResonance);n('bassLfo',setBassLfo);n('synthLfo',setSynthLfo);n('drumDecay',setDrumDecay);n('bassCutoff',setBassCutoff);n('synthCutoff',setSynthCutoff);n('bassSubAmount',setBassSubAmount);n('synthAttack',setSynthAttack);n('synthRelease',setSynthRelease);n('stutterBurst',setStutterBurst);n('macroKnob',setMacroKnob);n('grooveAmount',setGrooveAmount);n('metronomeLevel',setMetronomeLevel);n('drumPreset',setDrumPreset);n('bassPreset',setBassPreset);n('synthPreset',setSynthPreset);n('fxPreset',setFxPreset);n('fmIndex',setFmIndex);n('autoPilotBars',setAutoPilotBars);n('autoPilotStrength',setAutoPilotStrength);n('songCursor',setSongCursor);
+    b('stutterOn',setStutterOn);b('metronomeOn',setMetronomeOn);b('autoPilotOn',setAutoPilotOn);
+    if(snap.harmonicProfile)setHarmonicProfile(snap.harmonicProfile);if(snap.grooveProfile)setGrooveProfile(snap.grooveProfile);if(snap.sectionProfile)setSectionProfile(snap.sectionProfile);if(snap.bassWave)setBassWave(snap.bassWave);if(snap.synthWave)setSynthWave(snap.synthWave);if(snap.pilotPersonality)setPilotPersonality(snap.pilotPersonality);if(snap.arpeMode)setArpeMode(snap.arpeMode);
+    if(snap.laneStepCounts)setLaneStepCounts(snap.laneStepCounts);if(snap.patterns)setPatterns(snap.patterns);if(snap.bassLine)setBassLine(snap.bassLine);if(snap.synthLine)setSynthLine(snap.synthLine);if(snap.laneFx)setLaneFx(snap.laneFx);if(snap.laneVolumes)setLaneVolumes(snap.laneVolumes);if(snap.songPlan)setSongPlan(snap.songPlan);if(typeof snap.songCursor==='number')setSongCursor(snap.songCursor);if(snap.themeMemory)setThemeMemory(snap.themeMemory);if(snap.currentSeed)setCurrentSeed(snap.currentSeed);
     if(snap.soundDesign)setSoundDesign(snap.soundDesign);
     setStatusText(label);
   };
@@ -1224,11 +1314,20 @@ export default function CesiraV1(){
         <input value={projectName} onChange={e=>setProjectName(e.target.value)} style={{width:'100px',background:B1,border:`1px solid ${BD}`,borderRadius:'5px',padding:'2px 6px',fontSize:'10px',fontWeight:700,color:'#fff',outline:'none'}}/>
         <button onClick={togglePlay} style={{padding:'3px 14px',borderRadius:'6px',border:'none',background:isPlaying?'#f43f5e':'#34d399',color:isPlaying?'#fff':'#0a1628',fontWeight:900,fontSize:'10px',cursor:'pointer',letterSpacing:'0.08em',flexShrink:0,transition:'background 0.12s'}}>{isPlaying?'■ STOP':'▶ PLAY'}</button>
         <button onClick={randomize} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Freestyle</button>
-        <button onClick={autoJam} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Auto Jam</button><button onClick={()=>setAutoPilotOn(v=>!v)} style={{...pill(autoPilotOn),padding:'3px 8px',fontSize:'9px'}}>{autoPilotOn?'Pilot On':'Pilot Off'}</button>
-        <select value={autoPilotBars} onChange={e=>setAutoPilotBars(Number(e.target.value))} style={{background:B1,border:`1px solid ${BD}`,borderRadius:'4px',padding:'2px 4px',fontSize:'9px',fontWeight:800,color:'#cbd5e1',outline:'none'}}>
-          {[1,2,4,8].map(n=><option key={n} value={n}>{n} bar</option>)}
+        <button onClick={autoJam} style={{...pill(false),padding:'3px 8px',fontSize:'9px'}}>Auto Jam</button>
+        <button onClick={()=>setAutoPilotOn(v=>!v)} style={{...pill(autoPilotOn,'#67e8f9'),padding:'3px 8px',fontSize:'9px'}}>{autoPilotOn?'Pilot On':'Pilot Off'}</button>
+        <div style={{display:'flex',alignItems:'center',gap:'3px',padding:'0 4px',border:`1px solid ${BD}`,borderRadius:'6px',background:B1}}>
+          <span style={{fontSize:'7px',color:'#475569',fontWeight:800}}>Bars</span>
+          <input type="range" min={1} max={8} step={1} value={autoPilotBars} onChange={e=>setAutoPilotBars(Number(e.target.value))} style={{width:'40px',accentColor:'#67e8f9'}}/>
+          <span style={{fontSize:'8px',color:'#67e8f9',fontWeight:900,width:'10px',textAlign:'right'}}>{autoPilotBars}</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'3px',padding:'0 4px',border:`1px solid ${BD}`,borderRadius:'6px',background:B1}}>
+          <span style={{fontSize:'7px',color:'#475569',fontWeight:800}}>Will</span>
+          <input type="range" min={0.1} max={1} step={0.01} value={autoPilotStrength} onChange={e=>setAutoPilotStrength(Number(e.target.value))} style={{width:'42px',accentColor:'#a78bfa'}}/>
+        </div>
+        <select value={pilotPersonality} onChange={e=>{setPilotPersonality(e.target.value); if(currentSeed) setSongPlan(buildSongPlanFromSeed(currentSeed,e.target.value));}} style={{background:B1,border:`1px solid ${BD}`,borderRadius:'5px',padding:'3px 6px',fontSize:'8px',fontWeight:800,color:'#cbd5e1'}}>
+          {PILOT_PERSONALITY_NAMES.map(name=><option key={name} value={name}>{PILOT_PERSONALITIES[name].label}</option>)}
         </select>
-        <input type='range' min={0.2} max={1} step={0.01} value={autoPilotStrength} onChange={e=>setAutoPilotStrength(Number(e.target.value))} style={{width:'56px',accentColor:'#34d399'}} title='Pilot strength'/>
         <button onClick={recState==='recording'?stopRecording:startRecording} style={{...pill(recState==='recording','#f43f5e'),padding:'3px 8px',fontSize:'9px'}}>{recState==='recording'?'■ Rec':'⏺ Rec'}</button>
         <button onClick={undo} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>↩</button>
         <button onClick={redo} style={{...pill(false),padding:'3px 6px',fontSize:'9px'}}>↪</button>
@@ -1252,6 +1351,11 @@ export default function CesiraV1(){
         <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
           <div style={{width:'6px',height:'6px',borderRadius:'50%',background:midiEnabled?'#34d399':'#334155',transition:'background 0.3s'}}/>
           <span style={{fontSize:'7px',color:'#334155',fontWeight:700}}>MIDI</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:'4px',padding:'0 6px',border:`1px solid ${BD}`,borderRadius:'6px',background:B1}}>
+          <span style={{fontSize:'7px',fontWeight:800,color:'#94a3b8'}}>PLAN</span>
+          <span style={{fontSize:'7px',fontWeight:800,color:'#fbbf24'}}>{songPlan.length?`${songCursor+1}/${songPlan.length}`:'—'}</span>
+          <span style={{fontSize:'7px',fontWeight:700,color:'#f87171'}}>{pilotPersonality}</span>
         </div>
         <div style={{fontSize:'7px',color:'#34d399',opacity:0.55,maxWidth:'80px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{statusText}</div>
       </div>
